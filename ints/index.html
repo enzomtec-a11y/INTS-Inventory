@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventário INTS - Home</title>
+    <style>
+
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input[type="text"], textarea, select, input[type="number"], input[type="date"] { width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: #4CAF50; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; margin-top: 20px; }
+        button:hover { background-color: #45a049; }
+        .container {max-width: 1200px; margin: 0 auto;}
+        h1 {text-align: center; color: black; font-size: 3em; margin-bottom: 10px;}
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 30px;
+        }
+        
+        .menu-card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            text-decoration: none;
+            color: #333;
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>INTS - Inventário</h1>
+
+        <h2>Menu Inicial</h2>
+        <div class="menu-grid">
+            <a href="pages/produtos/cadastrar.php" class="menu-card">
+                <h2>Cadastrar Produto</h2>
+                <p>Adicione novos produtos ao inventário com atributos personalizados e estoque inicial</p>
+            </a>
+            
+            <a href="pages/produtos/listar.php" class="menu-card">
+                <h2>Ver Produtos</h2>
+                <p>Visualize, filtre, edite e gerencie todos os produtos cadastrados no sistema</p>
+            </a>
+            
+            <a href="pages/movimentacoes/solicitar.php" class="menu-card">
+                <h2>Movimentar Estoque</h2>
+                <p>Realize transferências de produtos entre diferentes locais de armazenamento</p>
+            </a>
+            
+            <a href="pages/movimentacoes/relatorio.php" class="menu-card">
+                <h2>Relatório de Movimentações</h2>
+                <p>Consulte o histórico completo de todas as movimentações realizadas</p>
+            </a>
+        </div>
+        
+        <div class="admin-section">
+            <h2>Administação</h2>
+            <div class="menu-grid">
+                <a href="pages/admin/admin_categorias.php" class="menu-card">
+                    <h2>Gerenciar Categorias</h2>
+                    <p>Crie e organize categorias hierárquicas para classificar seus produtos</p>
+                </a>
+                
+                <a href="pages/admin/admin_atributos.php" class="menu-card">
+                    <h2>Definir Atributos</h2>
+                    <p>Configure atributos personalizados (texto, número, data, booleano)</p>
+                </a>
+                
+                <a href="pages/admin/admin_categoria_atributo.php" class="menu-card">
+                    <h2>Vincular Atributos</h2>
+                    <p>Associe atributos às categorias e defina quais são obrigatórios</p>
+                </a>
+                
+                <a href="pages/admin/admin_regras_condicionais.php" class="menu-card">
+                    <h2>Regras Condicionais</h2>
+                    <p>Configure regras dinâmicas entre atributos (bloquear/tornar obrigatório)</p>
+                </a>
+                
+                <a href="pages/admin/admin_locais.php" class="menu-card">
+                    <h2>Gerenciar Locais</h2>
+                    <p>Cadastre e administre os locais de armazenamento do inventário</p>
+                </a>
+
+                <a href="pages/admin/admin_atributo_opcoes.php" class="menu-card">
+                    <h2>Opções de Atributos</h2>
+                    <p>Gerencie permissões de valores para atributos</p>
+                </a>
+
+                <a href="pages/admin/admin_categoria_opcoes.php" class="menu-card">
+                    <h2>Opções de Categorias</h2>
+                    <p>Defina regras de valores de atributo para categorias</p>
+                </a>
+
+                <a href="pages/admin/admin_produto_relacionamento.php" class="menu-card">
+                    <h2>Kits de Produtos</h2>
+                    <p>Crie e gerencie kits de produtos</p>
+                </a>
+
+                <a href="pages/admin/admin_cadastro_usuario.php" class="menu-card" style="background:#6c5ce7;">
+                    <h2>Gerenciar Usuários</h2>
+                    <p>Cadastrar, editar e vincular administradores de unidade</p>
+                </a>
+
+                <a href="logout.php" class="menu-card" style="background:#6c5ce7;">
+                    <h2>Login/Logout</h2>
+                    <p>Conectar-se ou desconectar-se (caso já estiver conectado) a uma conta</p>
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

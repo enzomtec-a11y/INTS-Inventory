@@ -1,0 +1,135 @@
+/* =================== */
+/* Estilos Globais */
+/* =================== */
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+h1, h2 {
+    color: #2c3e50;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 5px;
+    margin-top: 25px;
+}
+
+.container {
+    max-width: 1000px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.status-message {
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    font-weight: bold;
+}
+
+.status-message p {
+    margin: 0;
+}
+
+.status-message p[style*="green"] {
+    background-color: #e6ffe6;
+    color: #27ae60 !important;
+    border: 1px solid #27ae60;
+}
+
+/* =================== */
+/* Estilos de Formulário */
+/* =================== */
+form label {
+    display: block;
+    margin-top: 15px;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+form input[type="text"], 
+form input[type="number"], 
+form input[type="date"], 
+form select,
+form textarea {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box; /* Garante que padding e borda não aumentem o tamanho total */
+}
+
+form button[type="submit"] {
+    background-color: #3498db;
+    color: white;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 20px;
+    font-size: 1em;
+    transition: background-color 0.3s;
+}
+
+form button[type="submit"]:hover {
+    background-color: #2980b9;
+}
+
+/* =================== */
+/* Estilos de Tabela (`tabela_produtos.php`) */
+/* =================== */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+table th, table td {
+    border: 1px solid #ddd;
+    padding: 10px;
+    text-align: left;
+    vertical-align: top; /* Para garantir alinhamento no rowspan */
+}
+
+table th {
+    background-color: #ecf0f1;
+    color: #2c3e50;
+    font-weight: bold;
+}
+
+.estoque-positivo {
+    background-color: #d4edda;
+    color: #155724;
+    font-weight: bold;
+}
+
+.estoque-zero {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.action-links a {
+    display: block;
+    margin: 5px 0;
+}
+
+/* =================== */
+/* Estilos EAV / Atributos */
+/* =================== */
+.atributo-group {
+    padding: 10px;
+    border: 1px dashed #bdc3c7;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+
+.obrigatorio-star {
+    color: #e74c3c;
+    font-weight: bold;
+    margin-left: 5px;
+}

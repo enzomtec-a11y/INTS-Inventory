@@ -1,0 +1,104 @@
+<!--
+  Template completo para a aba "Componentes" / snippet a ser incluído no formulário de produto.
+  Cole este bloco dentro da aba Componentes do template do produto (onde são renderizados os detalhes do produto).
+  Ajustes possíveis:
+   - Substitua as tags PHP abaixo conforme sua estrutura (produto id, lista de locais).
+   - Verifique os caminhos dos scripts JS (../../assets/js/...) caso sua estrutura de pastas seja diferente.
+-->
+
+<div id="components-tab-wrapper" style="font-family:Arial,Helvetica,sans-serif; font-size:13px; color:#222;">
+
+  <!-- Inputs compartilhados (necessários para os scripts) -->
+  <input type="hidden" name="produto_id_for_kit" id="produto_id_for_kit"
+    value="<?php echo htmlspecialchars($produto['id'] ?? ''); ?>">
+
+  <!-- Header / ações rápidas -->
+  <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px;">
+    <label style="font-weight:600">Quantidade a montar:</label>
+    <input id="components_qty_to_make" type="number" value="1" min="1" style="width:90px; padding:6px;">
+
+    <label style="font-weight:600">Local (opcional):</label>
+    <select name="kit_local_id" id="kit_local_id" style="min-width:260px; padding:6px;">
+      <option value="">(usar distribuição automática)</option>
+      <?php
+        // Exemplo: gere options a partir da sua função que retorna locais
+        // Substitua getLocaisArray pelo seu método de listagem de locais
+        if (function_exists('getLocaisArray')) {
+          $locs = getLocaisArray($conn); // retorna [id => 'Nome do local', ...]
+          foreach ($locs as $lid => $lname) {
+            echo '<option value="'.htmlspecialchars($lid).'">'.htmlspecialchars($lname).'</option>';
+          }
+        } else {
+          // placeholder option caso não exista função
+          echo '<option value="1">Unidade Principal</option>';
+        }
+      ?>
+    </select>
+
+    <button id="btn-components-check" type="button" style="padding:6px 10px;">Verificar</button>
+    <button id="btn-components-reserve" type="button" style="padding:6px 10px;">Reservar</button>
+    <button id="btn-components-assemble" type="button" style="padding:6px 10px;">Montar (consumir)</button>
+  </div>
+
+  <!-- Painel principal com tabela de componentes -->
+  <div style="border:1px solid #e0e0e0; padding:10px; background:#fff;">
+    <div style="margin-bottom:8px; color:#555;">
+      Abaixo estão os componentes associados a este produto (BOM). Use "Verificar" para simular alocação,
+      "Reservar" para criar reservas, e "Montar" para consumir componentes (exige local).
+    </div>
+
+    <table id="components-table" class="components-table" style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr style="background:#f7f7f7; border-bottom:1px solid #ddd;">
+          <th style="text-align:left; padding:8px;">Componente</th>
+          <th style="width:110px; text-align:center; padding:8px;">Qtd / Un</th>
+          <th style="width:110px; text-align:center; padding:8px;">Qtd Total</th>
+          <th style="width:130px; text-align:center; padding:8px;">Disponível</th>
+          <th style="width:120px; text-align:center; padding:8px;">Locais</th>
+        </tr>
+      </thead>
+      <tbody id="components-table-body">
+        <!-- Preenchido dinamicamente por kit_components_ui.js (busca ../api/componentes.php?produto_id=...) -->
+      </tbody>
+    </table>
+
+    <div style="margin-top:12px;">
+      <strong>Saída / Log:</strong>
+      <pre id="components-output" style="margin-top:6px; background:#fafafa; padding:10px; border:1px solid #eee; max-height:260px; overflow:auto;"></pre>
+    </div>
+  </div>
+
+  <!-- Modal placeholder para alocação / seleção de patrimônios -->
+  <div id="components-modal-root" style="display:none;"></div>
+
+  <!-- Small help / legend -->
+  <div style="margin-top:8px; color:#666; font-size:12px;">
+    Nota: "Disponível" considera estoque físico menos reservas existentes. Se o produto componente for patrimonial,
+    a seleção de patrimônio (nº tombamento / série) pode ser necessária — solicite o endpoint /ints/api/patrimonios.php se quiser a seleção automática.
+  </div>
+
+</div>
+
+<!-- Scripts necessários: ajuste paths conforme sua estrutura de pastas -->
+<script src="../../assets/js/kit_allocate_ui.js"></script>
+<script src="../../assets/js/kit_components_ui.js"></script>
+
+<!-- Estilos leves para tabela (pode ser movido para seu CSS global) -->
+<style>
+  .components-table th, .components-table td { border-bottom:1px solid #f0f0f0; padding:8px; }
+  .components-table tbody tr:hover { background: #fbfbfb; }
+  .components-table td { vertical-align: middle; }
+  button { cursor:pointer; }
+</style>
+
+<!--
+  Notas de integração:
+   - kit_components_ui.js espera um endpoint GET ../api/componentes.php?produto_id=...
+     que retorne JSON array com objetos:
+      { produto_id, nome, quantidade_por_unidade, tipo_relacao, controla_estoque_proprio }
+     Se o seu endpoint for diferente, ajuste a função fetchComponents() no JS.
+   - kit_allocate_ui.js e kit_components_ui.js usam ../../api/kit_allocate.php (caminho relativo).
+     Certifique-se de que ints/api/kit_allocate.php esteja no local esperado; caso contrário, ajuste os fetch() no JS.
+   - Para mostrar patrimonios no modal, é opcional ter ../api/patrimonios.php?produto_id=... que retorne JSON lista de patrimonios disponíveis.
+   - Se quiser que as ações gravem o usuario logado automaticamente, defina window.LOGGED_USER_ID = <?php echo (int)$_SESSION['usuario_id'] ?? '0'; ?> antes dos includes (ou ajuste os scripts).
+-->
