@@ -8,7 +8,38 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 }
 
 $produto_id = (int)$_GET['id'];
-// Simulação do ID do usuário logado
+
+// Detecta usuário/unidade
+$usuario_nivel = $_SESSION['usuario_nivel'] ?? '';
+$usuario_unidade = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : 0;
+$unidade_locais_ids = [];
+if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
+    $unidade_locais_ids = getIdsLocaisDaUnidade($conn, $usuario_unidade);
+}
+
+// Se admin_unidade, verifica se o produto pertence à unidade
+if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
+    $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
+    $sql_check = "SELECT 1 FROM estoques e WHERE e.produto_id = ? AND e.local_id IN ($idsStr) LIMIT 1";
+    $stmt_check = $conn->prepare($sql_check);
+    $stmt_check->bind_param("i", $produto_id);
+    $stmt_check->execute();
+    $res_check = $stmt_check->get_result();
+    $stmt_check->close();
+    if (!($res_check && $res_check->num_rows > 0)) {
+        // tenta patrimonios
+        $sql_check2 = "SELECT 1 FROM patrimonios pt WHERE pt.produto_id = ? AND pt.local_id IN ($idsStr) LIMIT 1";
+        $stmt_check2 = $conn->prepare($sql_check2);
+        $stmt_check2->bind_param("i", $produto_id);
+        $stmt_check2->execute();
+        $res_check2 = $stmt_check2->get_result();
+        $stmt_check2->close();
+        if (!($res_check2 && $res_check2->num_rows > 0)) {
+            header("Location: listar.php?erro=delete_permissao_negada");
+            exit();
+        }
+    }
+}
 
 // Inicia transação para garantir atomicidade
 $conn->begin_transaction();

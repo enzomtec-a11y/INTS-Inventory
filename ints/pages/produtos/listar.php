@@ -3,6 +3,14 @@ require_once '../../config/_protecao.php';
 
 // --- 1. PREPARAÇÃO DOS FILTROS (Dropdowns) ---
 
+// Detecta usuário/unidade
+$usuario_nivel = $_SESSION['usuario_nivel'] ?? '';
+$usuario_unidade = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : 0;
+$unidade_locais_ids = [];
+if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
+    $unidade_locais_ids = getIdsLocaisDaUnidade($conn, $usuario_unidade);
+}
+
 // Carregar Categorias
 $categorias = [];
 $sql_cat = "SELECT id, nome FROM categorias WHERE deletado = FALSE ORDER BY nome";
@@ -12,7 +20,8 @@ while ($r = $res_cat->fetch_assoc()) $categorias[] = $r;
 // Carregar Locais (Hierárquicos)
 $locais_formatados = [];
 if (function_exists('getLocaisFormatados')) {
-    $locais_formatados = getLocaisFormatados($conn, false); // false = traz todos
+    $restricao = ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) ? $usuario_unidade : null;
+    $locais_formatados = getLocaisFormatados($conn, false, $restricao); // false = traz todos (ou só da unidade)
 }
 
 // --- 2. CAPTURA DOS FILTROS DO GET ---
@@ -76,6 +85,15 @@ if (!empty($filtro_tipo_posse)) {
     $sql .= " AND p.tipo_posse = ?";
     $params[] = $filtro_tipo_posse;
     $types .= "s";
+}
+
+// Se o usuário for admin_unidade, restringe produtos àqueles que possuem estoque/patrimônio na unidade
+if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
+    $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
+    $sql .= " AND (
+        EXISTS (SELECT 1 FROM estoques e2 WHERE e2.produto_id = p.id AND e2.local_id IN ($idsStr))
+        OR EXISTS (SELECT 1 FROM patrimonios pt WHERE pt.produto_id = p.id AND pt.local_id IN ($idsStr))
+    )";
 }
 
 $sql .= " ORDER BY p.nome, l.nome";

@@ -14,18 +14,7 @@ if (session_status() === PHP_SESSION_NONE) {
  */
 function exigirLogin() {
     if (!isset($_SESSION['usuario_id'])) {
-        // Redireciona para o login na raiz
-        // Ajuste o caminho conforme necessário dependendo de onde este arquivo é chamado
-        // Como auth.php é incluído, o caminho relativo depende do arquivo chamador.
-        // O ideal é usar caminho absoluto a partir da raiz do servidor ou uma constante.
-        
-        // Vamos tentar inferir o caminho para a raiz baseado na profundidade atual
-        $profundidade = substr_count($_SERVER['PHP_SELF'], '/') - 1;
-        // Ajuste simples: se estamos em /ints/pages/produtos/, precisamos subir 2 niveis
-        // Mas o header Location aceita caminhos absolutos do site (ex: /ints/login.php)
-        
-        // Solução Robusta: Definir BASE_URL no config se possível, senão usamos relativo simples
-        header("Location: ../../login.php"); // Tentativa genérica para arquivos em pages/subpasta
+        header("Location: ../../login.php");
         exit();
     }
 }
@@ -54,5 +43,27 @@ function getUsuarioId() {
  */
 function getUsuarioNome() {
     return htmlspecialchars($_SESSION['usuario_nome'] ?? 'Visitante');
+}
+
+/**
+ * Retorna o nível do usuário logado.
+ */
+function getUsuarioNivel() {
+    return $_SESSION['usuario_nivel'] ?? '';
+}
+
+/**
+ * Retorna a unidade_id do usuário logado (se houver).
+ */
+function getUsuarioUnidadeId() {
+    return isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : 0;
+}
+
+/**
+ * Indica se o usuário é admin de unidade.
+ */
+function isAdminUnidade() {
+    $nivel = getUsuarioNivel();
+    return $nivel === 'admin_unidade';
 }
 ?>

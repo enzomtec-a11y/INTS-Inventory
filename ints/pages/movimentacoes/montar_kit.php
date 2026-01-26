@@ -3,8 +3,13 @@ require_once '../../config/_protecao.php';
 
 // Apenas usuários logados podem acessar
 $usuario_id = getUsuarioId();
+$nivel_usuario = $_SESSION['usuario_nivel'] ?? 'comum';
+$unidade_id = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : null;
+$filtro_unidade = ($nivel_usuario === 'admin_unidade') ? $unidade_id : null;
 
 // 1. Carregar Produtos (que podem ser Kits)
+// Para admin_unidade, podemos opcionalmente limitar os produtos que aparecem (por exemplo, produtos que tenham componentes nesta unidade).
+// Para simplicidade deixamos listar todos os produtos; se quiser, posso restringir aqui também.
 $produtos = [];
 $sql_prod = "SELECT id, nome FROM produtos WHERE deletado = FALSE ORDER BY nome";
 $res_prod = $conn->query($sql_prod);
@@ -13,12 +18,13 @@ while ($row = $res_prod->fetch_assoc()) {
 }
 
 // 2. Carregar Locais (Onde o Kit montado será guardado)
-$locais = [];
+// Se admin_unidade, listar apenas locais da unidade; senão listar todos.
 if (function_exists('getLocaisFormatados')) {
-    $locais = getLocaisFormatados($conn, true);
+    $locais = getLocaisFormatados($conn, true, $filtro_unidade);
 } else {
     // Fallback simples
     $res_loc = $conn->query("SELECT id, nome FROM locais WHERE deletado = FALSE ORDER BY nome");
+    $locais = [];
     while ($r = $res_loc->fetch_assoc()) $locais[$r['id']] = $r['nome'];
 }
 ?>
@@ -87,6 +93,9 @@ if (function_exists('getLocaisFormatados')) {
                     <option value="<?php echo $id; ?>"><?php echo htmlspecialchars($nome); ?></option>
                 <?php endforeach; ?>
             </select>
+            <?php if ($filtro_unidade): ?>
+                <small style="color:#666">Como administrador da unidade, você só pode montar kits para locais da sua unidade.</small>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -118,7 +127,7 @@ if (function_exists('getLocaisFormatados')) {
 </div>
 
 <script>
-    const usuarioId = <?php echo $usuarioId ?? 0; ?>;
+    const usuarioId = <?php echo $usuario_id ?? 0; ?>;
     const btnMontar = document.getElementById('btn-montar');
     const previewArea = document.getElementById('preview-area');
     const previewBody = document.getElementById('preview-body');
@@ -160,17 +169,6 @@ if (function_exists('getLocaisFormatados')) {
 
             // explosao_flat traz: produto_id, nome, quantidade_total (para 1un do pai), estoque_total
             for (const comp of dataComp.explosao_flat) {
-                // Cálculo: Qtd Necessária = (Qtd por unidade * Qtd Produção)
-                // A API componentes.php retorna 'quantidade_total' baseada no multiplier=1.
-                // Se o flat da API já vier multiplicado, usamos direto.
-                // Vamos recalcular para garantir:
-                
-                // Nota: A API componentes.php retorna 'quantidade_total' já calculada se passássemos multiplier, 
-                // mas a chamada padrão é multiplier=1.
-                // Entretanto, o flat['quantidade_total'] da API é baseado na chamada da API.
-                // A API `componentes.php` foi feita para visualizar a estrutura.
-                
-                // Vamos usar a lógica: (comp.quantidade_total / 1) * qtd_desejada
                 const qtdNecessaria = (parseFloat(comp.quantidade_total) * qtd).toFixed(2);
                 const estoqueAtual = parseFloat(comp.estoque_total);
                 

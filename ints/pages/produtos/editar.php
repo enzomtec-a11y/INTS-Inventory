@@ -11,6 +11,14 @@ $categorias = [];
 $produtos_lista = []; 
 $usuario_id_log = getUsuarioId();
 
+// Detecta usuário/unidade
+$usuario_nivel = $_SESSION['usuario_nivel'] ?? '';
+$usuario_unidade = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : 0;
+$unidade_locais_ids = [];
+if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
+    $unidade_locais_ids = getIdsLocaisDaUnidade($conn, $usuario_unidade);
+}
+
 // --- 1. FUNÇÃO AUXILIAR EAV ---
 function get_eav_params_update($valor, $tipo) {
     $coluna_valor = null; $bind_type = null; $valor_tratado = $valor;
@@ -95,7 +103,23 @@ if (!$produto_id) {
 $res_cat = $conn->query("SELECT id, nome FROM categorias WHERE deletado = FALSE ORDER BY nome");
 while ($r = $res_cat->fetch_assoc()) $categorias[] = $r;
 
-$res_prod = $conn->query("SELECT id, nome FROM produtos WHERE deletado = FALSE AND id != $produto_id ORDER BY nome");
+// Lista de produtos para seleção de componente: se admin_unidade, limitar aos produtos da unidade
+if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
+    $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
+    $sql_prod = "
+        SELECT DISTINCT p.id, p.nome
+        FROM produtos p
+        WHERE p.deletado = FALSE
+        AND (
+            EXISTS (SELECT 1 FROM estoques e WHERE e.produto_id = p.id AND e.local_id IN ($idsStr))
+            OR EXISTS (SELECT 1 FROM patrimonios pt WHERE pt.produto_id = p.id AND pt.local_id IN ($idsStr))
+        )
+        ORDER BY p.nome
+    ";
+    $res_prod = $conn->query($sql_prod);
+} else {
+    $res_prod = $conn->query("SELECT id, nome FROM produtos WHERE deletado = FALSE AND id != $produto_id ORDER BY nome");
+}
 while ($r = $res_prod->fetch_assoc()) $produtos_lista[] = $r;
 
 
@@ -119,96 +143,69 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } elseif ($tipo_posse == 'locado' && empty($locador_nome)) {
         $status_message = "<p style='color:red'>Para produtos locados, o nome do locador é obrigatório.</p>";
     } else {
-        $conn->begin_transaction();
-        try {
-            // 1. UPDATE Produto
-            $sql_up = "UPDATE produtos SET nome=?, descricao=?, categoria_id=?, controla_estoque_proprio=?, tipo_posse=?, locador_nome=?, data_atualizado=NOW() WHERE id=?";
-            $stmt = $conn->prepare($sql_up);
-            $stmt->bind_param("ssiissi", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_nome, $produto_id);
-            $stmt->execute();
-            $stmt->close();
-
-            // 2. UPDATE Componentes (Kit)
-            $conn->query("DELETE FROM produto_relacionamento WHERE produto_principal_id = $produto_id AND tipo_relacao = 'kit'");
-            
-            // Só insere componentes se for kit e houver dados
-            if ($is_kit && !empty($_POST['componente_id'])) {
-                $stmt_k = $conn->prepare("INSERT INTO produto_relacionamento (produto_principal_id, subproduto_id, quantidade, tipo_relacao) VALUES (?, ?, ?, 'kit')");
-                foreach ($_POST['componente_id'] as $idx => $sub_id) {
-                    $qtd = (float)($_POST['componente_qtd'][$idx] ?? 1);
-                    // Valida se o subproduto existe e quantidade > 0
-                    if ($sub_id > 0 && $qtd > 0) {
-                        $stmt_k->bind_param("iid", $produto_id, $sub_id, $qtd);
-                        $stmt_k->execute();
-                    }
+        // Se usuário é admin_unidade, certifique-se de que ele tem permissão para editar este produto
+        if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
+            $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
+            $sql_check = "SELECT 1 FROM estoques e WHERE e.produto_id = ? AND e.local_id IN ($idsStr) LIMIT 1";
+            $stc = $conn->prepare($sql_check);
+            $stc->bind_param("i", $produto_id);
+            $stc->execute();
+            $rc = $stc->get_result();
+            $stc->close();
+            if (!($rc && $rc->num_rows > 0)) {
+                // Também verifica patrimonios
+                $sql_check2 = "SELECT 1 FROM patrimonios pt WHERE pt.produto_id = ? AND pt.local_id IN ($idsStr) LIMIT 1";
+                $stc2 = $conn->prepare($sql_check2);
+                $stc2->bind_param("i", $produto_id);
+                $stc2->execute();
+                $rc2 = $stc2->get_result();
+                $stc2->close();
+                if (!($rc2 && $rc2->num_rows > 0)) {
+                    $status_message = "<p style='color:red'>Você não tem permissão para editar este produto (fora da sua unidade).</p>";
                 }
-                $stmt_k->close();
             }
+        }
 
-            // 3. UPDATE Atributos
-            $conn->query("DELETE FROM atributos_valor WHERE produto_id = $produto_id");
-            
-            // Preferir array atributo_valor[...] (padrão atual). Se não existir, tentar o padrão antigo 'attr_'
-            if (!empty($_POST['atributo_valor']) && is_array($_POST['atributo_valor'])) {
-                foreach ($_POST['atributo_valor'] as $aid => $val) {
-                    $attr_id = (int)$aid;
-                    $tipo = strtolower($_POST["tipo_attr_" . $attr_id] ?? 'texto');
+        if (empty($status_message)) {
+            $conn->begin_transaction();
+            try {
+                // 1. UPDATE Produto
+                $sql_up = "UPDATE produtos SET nome=?, descricao=?, categoria_id=?, controla_estoque_proprio=?, tipo_posse=?, locador_nome=?, data_atualizado=NOW() WHERE id=?";
+                $stmt = $conn->prepare($sql_up);
+                $stmt->bind_param("ssiissi", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_nome, $produto_id);
+                $stmt->execute();
+                $stmt->close();
 
-                    $val_salvar = is_array($val) ? implode(',', $val) : $val;
-
-                    // Só tente mapear para opção se o atributo for do tipo seleção
-                    if (in_array($tipo, ['selecao','select','opcao','multi_opcao'])) {
-                        if (is_numeric($val_salvar) && (int)$val_salvar > 0) {
-                            $op = obterOpcaoPorId($conn, (int)$val_salvar);
-                            if ($op) {
-                                $vp_id = mapOpcaoParaValorPermitido($conn, (int)$val_salvar);
-                                $texto = $op['valor'];
-                                if ($vp_id) {
-                                    $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto, valor_permitido_id) VALUES (?, ?, ?, ?)");
-                                    $stmt_a->bind_param("iisi", $produto_id, $attr_id, $texto, $vp_id);
-                                    $stmt_a->execute();
-                                    $stmt_a->close();
-                                    continue;
-                                } else {
-                                    $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
-                                    $stmt_a->bind_param("iis", $produto_id, $attr_id, $texto);
-                                    $stmt_a->execute();
-                                    $stmt_a->close();
-                                    continue;
-                                }
-                            }
-                        } else {
-                            // salva como texto (select com texto livre)
-                            $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
-                            $stmt_a->bind_param("iis", $produto_id, $attr_id, $val_salvar);
-                            $stmt_a->execute();
-                            $stmt_a->close();
-                            continue;
+                // 2. UPDATE Componentes (Kit)
+                $conn->query("DELETE FROM produto_relacionamento WHERE produto_principal_id = $produto_id AND tipo_relacao = 'kit'");
+                
+                // Só insere componentes se for kit e houver dados
+                if ($is_kit && !empty($_POST['componente_id'])) {
+                    $stmt_k = $conn->prepare("INSERT INTO produto_relacionamento (produto_principal_id, subproduto_id, quantidade, tipo_relacao) VALUES (?, ?, ?, 'kit')");
+                    foreach ($_POST['componente_id'] as $idx => $sub_id) {
+                        $qtd = (float)($_POST['componente_qtd'][$idx] ?? 1);
+                        // Valida se o subproduto existe e quantidade > 0
+                        if ($sub_id > 0 && $qtd > 0) {
+                            $stmt_k->bind_param("iid", $produto_id, $sub_id, $qtd);
+                            $stmt_k->execute();
                         }
                     }
-
-                    // Caso normal
-                    $params = get_eav_params_update($val_salvar, $tipo);
-                    if ($params['coluna_valor']) {
-                        $sql_ins = "INSERT INTO atributos_valor (produto_id, atributo_id, {$params['coluna_valor']}) VALUES (?, ?, ?)";
-                        $stmt_a = $conn->prepare($sql_ins);
-                        $bind = "ii" . $params['bind_type'];
-                        $stmt_a->bind_param($bind, $produto_id, $attr_id, $params['valor_tratado']);
-                        $stmt_a->execute();
-                        $stmt_a->close();
-                    }
+                    $stmt_k->close();
                 }
-            } else {
-                // Padrão antigo: campos com prefixo attr_{id}
-                foreach ($_POST as $key => $valor) {
-                    if (strpos($key, 'attr_') === 0) {
-                        $attr_id = (int)str_replace('attr_', '', $key);
-                        $tipo = $_POST["tipo_attr_" . $attr_id] ?? '';
-                        if (empty($tipo)) continue;
 
-                        $val_salvar = is_array($valor) ? implode(',', $valor) : $valor;
+                // 3. UPDATE Atributos
+                $conn->query("DELETE FROM atributos_valor WHERE produto_id = $produto_id");
+                
+                // Preferir array atributo_valor[...] (padrão atual). Se não existir, tentar o padrão antigo 'attr_'
+                if (!empty($_POST['atributo_valor']) && is_array($_POST['atributo_valor'])) {
+                    foreach ($_POST['atributo_valor'] as $aid => $val) {
+                        $attr_id = (int)$aid;
+                        $tipo = strtolower($_POST["tipo_attr_" . $attr_id] ?? 'texto');
 
-                        if (in_array(strtolower($tipo), ['selecao','select','opcao','multi_opcao'])) {
+                        $val_salvar = is_array($val) ? implode(',', $val) : $val;
+
+                        // Só tente mapear para opção se o atributo for do tipo seleção
+                        if (in_array($tipo, ['selecao','select','opcao','multi_opcao'])) {
                             if (is_numeric($val_salvar) && (int)$val_salvar > 0) {
                                 $op = obterOpcaoPorId($conn, (int)$val_salvar);
                                 if ($op) {
@@ -229,6 +226,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     }
                                 }
                             } else {
+                                // salva como texto (select com texto livre)
                                 $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
                                 $stmt_a->bind_param("iis", $produto_id, $attr_id, $val_salvar);
                                 $stmt_a->execute();
@@ -237,6 +235,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             }
                         }
 
+                        // Caso normal
                         $params = get_eav_params_update($val_salvar, $tipo);
                         if ($params['coluna_valor']) {
                             $sql_ins = "INSERT INTO atributos_valor (produto_id, atributo_id, {$params['coluna_valor']}) VALUES (?, ?, ?)";
@@ -247,25 +246,75 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             $stmt_a->close();
                         }
                     }
+                } else {
+                    // Padrão antigo: campos com prefixo attr_{id}
+                    foreach ($_POST as $key => $valor) {
+                        if (strpos($key, 'attr_') === 0) {
+                            $attr_id = (int)str_replace('attr_', '', $key);
+                            $tipo = $_POST["tipo_attr_" . $attr_id] ?? '';
+                            if (empty($tipo)) continue;
+
+                            $val_salvar = is_array($valor) ? implode(',', $valor) : $valor;
+
+                            if (in_array(strtolower($tipo), ['selecao','select','opcao','multi_opcao'])) {
+                                if (is_numeric($val_salvar) && (int)$val_salvar > 0) {
+                                    $op = obterOpcaoPorId($conn, (int)$val_salvar);
+                                    if ($op) {
+                                        $vp_id = mapOpcaoParaValorPermitido($conn, (int)$val_salvar);
+                                        $texto = $op['valor'];
+                                        if ($vp_id) {
+                                            $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto, valor_permitido_id) VALUES (?, ?, ?, ?)");
+                                            $stmt_a->bind_param("iisi", $produto_id, $attr_id, $texto, $vp_id);
+                                            $stmt_a->execute();
+                                            $stmt_a->close();
+                                            continue;
+                                        } else {
+                                            $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
+                                            $stmt_a->bind_param("iis", $produto_id, $attr_id, $texto);
+                                            $stmt_a->execute();
+                                            $stmt_a->close();
+                                            continue;
+                                        }
+                                    }
+                                } else {
+                                    $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
+                                    $stmt_a->bind_param("iis", $produto_id, $attr_id, $val_salvar);
+                                    $stmt_a->execute();
+                                    $stmt_a->close();
+                                    continue;
+                                }
+                            }
+
+                            $params = get_eav_params_update($val_salvar, $tipo);
+                            if ($params['coluna_valor']) {
+                                $sql_ins = "INSERT INTO atributos_valor (produto_id, atributo_id, {$params['coluna_valor']}) VALUES (?, ?, ?)";
+                                $stmt_a = $conn->prepare($sql_ins);
+                                $bind = "ii" . $params['bind_type'];
+                                $stmt_a->bind_param($bind, $produto_id, $attr_id, $params['valor_tratado']);
+                                $stmt_a->execute();
+                                $stmt_a->close();
+                            }
+                        }
+                    }
                 }
+
+                // 4. Arquivos
+                if (function_exists('processarUploadArquivo')) {
+                    if (!empty($_FILES['arq_imagem']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_imagem'], 'imagem');
+                    if (!empty($_FILES['arq_nota']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_nota'], 'nota_fiscal');
+                    if (!empty($_FILES['arq_manual']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_manual'], 'manual');
+                }
+                
+                if(function_exists('registrarLog')) registrarLog($conn, $usuario_id_log, 'produtos', $produto_id, 'EDICAO', "Produto editado.", $produto_id);
+
+                $conn->commit();
+                header("Location: listar.php?sucesso=editado");
+                exit;
+
+            } catch (Exception $e) {
+                $conn->rollback();
+                $status_message = "<p style='color:red'>Erro: " . $e->getMessage() . "</p>";
             }
-
-            // 4. Arquivos
-            if (function_exists('processarUploadArquivo')) {
-                if (!empty($_FILES['arq_imagem']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_imagem'], 'imagem');
-                if (!empty($_FILES['arq_nota']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_nota'], 'nota_fiscal');
-                if (!empty($_FILES['arq_manual']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_manual'], 'manual');
-            }
-            
-            if(function_exists('registrarLog')) registrarLog($conn, $usuario_id_log, 'produtos', $produto_id, 'EDICAO', "Produto editado.", $produto_id);
-
-            $conn->commit();
-            header("Location: listar.php?sucesso=editado");
-            exit;
-
-        } catch (Exception $e) {
-            $conn->rollback();
-            $status_message = "<p style='color:red'>Erro: " . $e->getMessage() . "</p>";
         }
     }
 }
@@ -278,6 +327,28 @@ $produto_data = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 if (!$produto_data) die("Produto não encontrado.");
+
+// Se admin_unidade, valida se produto pertence à unidade antes de permitir edição
+if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
+    $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
+    $sql_check = "SELECT 1 FROM estoques e WHERE e.produto_id = ? AND e.local_id IN ($idsStr) LIMIT 1";
+    $stc = $conn->prepare($sql_check);
+    $stc->bind_param("i", $produto_id);
+    $stc->execute();
+    $rc = $stc->get_result();
+    $stc->close();
+    if (!($rc && $rc->num_rows > 0)) {
+        $sql_check2 = "SELECT 1 FROM patrimonios pt WHERE pt.produto_id = ? AND pt.local_id IN ($idsStr) LIMIT 1";
+        $stc2 = $conn->prepare($sql_check2);
+        $stc2->bind_param("i", $produto_id);
+        $stc2->execute();
+        $rc2 = $stc2->get_result();
+        $stc2->close();
+        if (!($rc2 && $rc2->num_rows > 0)) {
+            die("Acesso negado: produto fora da sua unidade.");
+        }
+    }
+}
 
 // Carregar Componentes
 $sql_k = "SELECT subproduto_id, quantidade FROM produto_relacionamento WHERE produto_principal_id = $produto_id AND tipo_relacao = 'kit'";

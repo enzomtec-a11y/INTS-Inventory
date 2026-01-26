@@ -16,6 +16,40 @@ $arquivos = [];
 $estoque = [];
 $componentes = [];
 
+// Detecta usuário/unidade
+$usuario_nivel = $_SESSION['usuario_nivel'] ?? '';
+$usuario_unidade = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : 0;
+$unidade_locais_ids = [];
+if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
+    $unidade_locais_ids = getIdsLocaisDaUnidade($conn, $usuario_unidade);
+}
+
+// Verifica se produto pertence à unidade (se for admin_unidade)
+function produtoPertenceUnidade($conn, $produto_id, $locais_ids) {
+    if (empty($locais_ids)) return false;
+    $idsStr = implode(',', array_map('intval', $locais_ids));
+    $sql = "SELECT 1 FROM estoques WHERE produto_id = ? AND local_id IN ($idsStr) LIMIT 1";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $produto_id);
+    $stmt->execute();
+    $r = $stmt->get_result();
+    if ($r && $r->num_rows > 0) { $stmt->close(); return true; }
+    $stmt->close();
+    $sql2 = "SELECT 1 FROM patrimonios WHERE produto_id = ? AND local_id IN ($idsStr) LIMIT 1";
+    $stmt2 = $conn->prepare($sql2);
+    $stmt2->bind_param("i", $produto_id);
+    $stmt2->execute();
+    $r2 = $stmt2->get_result();
+    $stmt2->close();
+    return ($r2 && $r2->num_rows > 0);
+}
+
+if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
+    if (!produtoPertenceUnidade($conn, $produto_id, $unidade_locais_ids)) {
+        die("Acesso negado: produto não pertence à sua unidade.");
+    }
+}
+
 // BUSCAR DADOS BÁSICOS
 $sql_base = "SELECT p.*, c.nome as categoria_nome 
              FROM produtos p 
