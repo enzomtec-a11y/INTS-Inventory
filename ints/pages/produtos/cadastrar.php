@@ -136,7 +136,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
     
     $local_id = (int)($_POST['local_id'] ?? 0);
-    $quantidade_inicial = isset($_POST['quantidade_inicial']) ? (float)$_POST['quantidade_inicial'] : 0;
+    // Quantidade inicial removida do formulário; definimos 1 automaticamente ao criar estoque
     $tipo_posse = $_POST['tipo_posse'] ?? 'proprio';
     $locador_nome = trim($_POST['locador_nome'] ?? '');
     $componentes_ids = $_POST['componente_id'] ?? [];
@@ -169,7 +169,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 if (function_exists('registrarLog')) registrarLog($conn, $usuario_id_log, 'produtos', $produto_id, 'CRIACAO', "Produto criado via formulário (composição inline).", $produto_id);
 
-                if ($controla_estoque && $local_id && $quantidade_inicial > 0) {
+                // Se controla estoque e foi indicado local, cria estoque com quantidade = 1 (nova regra)
+                if ($controla_estoque && $local_id) {
+                    $quantidade_inicial = 1; // fix to 1 as requested
                     $stmt = $conn->prepare("INSERT INTO estoques (produto_id, local_id, quantidade) VALUES (?, ?, ?)");
                     $stmt->bind_param("iid", $produto_id, $local_id, $quantidade_inicial);
                     $stmt->execute();
@@ -385,10 +387,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <option value="<?php echo $id; ?>"><?php echo htmlspecialchars($path); ?></option>
                     <?php endforeach; ?>
                 </select>
-            </div>
-            <div class="form-group">
-                <label>Quantidade Inicial</label>
-                <input type="number" name="quantidade_inicial" step="any" min="0" value="0">
             </div>
 
             <h3>Atributos</h3>

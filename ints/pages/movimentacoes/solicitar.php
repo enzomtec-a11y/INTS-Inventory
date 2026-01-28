@@ -7,138 +7,167 @@ $nivel_usuario = $_SESSION['usuario_nivel'] ?? 'comum';
 $unidade_id = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : null;
 $filtro_unidade = ($nivel_usuario === 'admin_unidade') ? $unidade_id : null;
 
-// --- FUNÇÕES AUXILIARES ---
-
-/**
- * Retorna o saldo disponível do produto em um local específico.
- * Se o produto controla estoque próprio, retorna o valor em estoques.quantidade.
- * Se o produto é kit (controla_estoque_proprio == 0), calcula disponibilidade
- * com base nos componentes diretos (min(estoque_componente / qtd_por_unidade)).
- * Retorna float (0 se não houver registro).
- */
-function getSaldoDisponivel($conn, $produto_id, $local_id) {
-    $produto_id = (int)$produto_id;
-    $local_id = (int)$local_id;
-    if ($produto_id <= 0 || $local_id <= 0) return 0.0;
-
-    // Busca se o produto controla estoque próprio
-    $stmt = $conn->prepare("SELECT controla_estoque_proprio FROM produtos WHERE id = ? LIMIT 1");
-    $stmt->bind_param("i", $produto_id);
-    $stmt->execute();
-    $prod = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    if (!$prod) return 0.0;
-
-    $controla = (int)($prod['controla_estoque_proprio'] ?? 1);
-
-    if ($controla === 1) {
-        // Produto físico: pega estoque direto
-        $stmt = $conn->prepare("SELECT quantidade FROM estoques WHERE produto_id = ? AND local_id = ? LIMIT 1");
-        $stmt->bind_param("ii", $produto_id, $local_id);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-        return isset($row['quantidade']) ? (float)$row['quantidade'] : 0.0;
-    } else {
-        // Produto é kit/virtual: calcular por componentes diretos
-        $stmt = $conn->prepare("SELECT pr.subproduto_id, pr.quantidade as qtd_por_unidade
-                                FROM produto_relacionamento pr
-                                WHERE pr.produto_principal_id = ?");
-        $stmt->bind_param("i", $produto_id);
-        $stmt->execute();
-        $res = $stmt->get_result();
-        $stmt->close();
-
-        $min_possible = null;
-        while ($comp = $res->fetch_assoc()) {
-            $sub_id = (int)$comp['subproduto_id'];
-            $qtd_por_unidade = (float)$comp['qtd_por_unidade'];
-            if ($qtd_por_unidade <= 0) {
-                // evita divisão por zero: considera indisponível
-                $min_possible = 0.0;
-                break;
-            }
-            // pega estoque do componente no local
-            $stmt2 = $conn->prepare("SELECT quantidade FROM estoques WHERE produto_id = ? AND local_id = ? LIMIT 1");
-            $stmt2->bind_param("ii", $sub_id, $local_id);
-            $stmt2->execute();
-            $r2 = $stmt2->get_result()->fetch_assoc();
-            $stmt2->close();
-            $estoque_comp = isset($r2['quantidade']) ? (float)$r2['quantidade'] : 0.0;
-
-            // quantas unidades do kit esse componente suporta
-            $possible = $estoque_comp / $qtd_por_unidade;
-            if ($min_possible === null || $possible < $min_possible) $min_possible = $possible;
-        }
-
-        return ($min_possible === null) ? 0.0 : (float)$min_possible;
-    }
+// Se admin_unidade, pega ids de locais permitidos
+$ids_permitidos = [];
+if ($filtro_unidade) {
+    $ids_permitidos = getIdsLocaisDaUnidade($conn, $filtro_unidade);
 }
 
-// --- HANDLER AJAX: consulta saldo via GET simples ---
-// Ex.: solicitar.php?acao=saldo&produto_id=5&local_id=10
-if (isset($_GET['acao']) && $_GET['acao'] === 'saldo') {
+// Carrega mapa de locais
+$mapa_locais = function_exists('getLocaisFormatados') ? getLocaisFormatados($conn, false) : [];
+
+/**
+ * AJAX handler: retorna locais onde um produto está armazenado
+ * Endpoint: solicitar.php?acao=locais_produto&produto_id=NN
+ * Retorna JSON: {sucesso:true, locais:[{local_id, local_nome, quantidade}, ...]}
+ */
+if (isset($_GET['acao']) && $_GET['acao'] === 'locais_produto') {
     header('Content-Type: application/json; charset=utf-8');
-    $produto_q = isset($_GET['produto_id']) ? (int)$_GET['produto_id'] : 0;
-    $local_q = isset($_GET['local_id']) ? (int)$_GET['local_id'] : 0;
-    if ($produto_q <= 0 || $local_q <= 0) {
-        echo json_encode(['sucesso' => false, 'mensagem' => 'Produto ou local inválido', 'saldo' => 0]);
+    $produto_id_q = isset($_GET['produto_id']) ? (int)$_GET['produto_id'] : 0;
+    if ($produto_id_q <= 0) {
+        echo json_encode(['sucesso' => false, 'mensagem' => 'produto_id inválido', 'locais' => []]);
         exit;
     }
-    $saldo = getSaldoDisponivel($conn, $produto_q, $local_q);
-    echo json_encode(['sucesso' => true, 'saldo' => (float)$saldo]);
+
+    // Buscar locais onde o produto tem estoque
+    $sql = "
+        SELECT e.local_id, COALESCE(l.nome, 'Sem local') as local_nome, e.quantidade
+        FROM estoques e
+        LEFT JOIN locais l ON e.local_id = l.id
+        WHERE e.produto_id = ? AND e.quantidade > 0
+    ";
+
+    if ($filtro_unidade && !empty($ids_permitidos)) {
+        $idsStr = implode(',', array_map('intval', $ids_permitidos));
+        $sql .= " AND e.local_id IN ($idsStr)";
+    }
+
+    $sql .= " ORDER BY e.local_id ASC";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        echo json_encode(['sucesso' => false, 'mensagem' => 'Erro ao preparar SQL: ' . $conn->error]);
+        exit;
+    }
+    $stmt->bind_param("i", $produto_id_q);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $out = [];
+    while ($r = $res->fetch_assoc()) {
+        $out[] = [
+            'local_id' => (int)$r['local_id'],
+            'local_nome' => $r['local_nome'],
+            'quantidade' => (float)$r['quantidade']
+        ];
+    }
+    $stmt->close();
+    echo json_encode(['sucesso' => true, 'locais' => $out], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-// 1. CARREGAR LOCAIS: origem filtrada para admin_unidade; destino mostra todos (para permitir solicitações entre unidades)
-$locais_origem = getLocaisFormatados($conn, true, $filtro_unidade); // apenas salas da unidade (se for admin_unidade) ou todos se null
-$locais_destino = getLocaisFormatados($conn, true, null); // todos as salas para escolher destino
-
-// 2. CARREGAR PRODUTOS (Sem filtro por enquanto, solicitação pode ser global)
+// --- BUSCAR LISTA DE PRODUTOS QUE POSSUEM ESTOQUE ---
 $produtos = [];
-$res_prod = $conn->query("SELECT id, nome FROM produtos WHERE deletado = FALSE ORDER BY nome");
-while ($row = $res_prod->fetch_assoc()) $produtos[] = $row;
+$sql_produtos = "
+    SELECT DISTINCT p.id AS produto_id, p.nome
+    FROM produtos p
+    WHERE p.deletado = FALSE
+      AND EXISTS (
+         SELECT 1 FROM estoques e
+         WHERE e.produto_id = p.id AND e.quantidade > 0
+    )
+    ORDER BY p.nome
+";
 
-// 3. PROCESSAR ENVIO DE FORMULÁRIO
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['acao']) && $_POST['acao'] == 'solicitar') {
-    $produto_id = (int)$_POST['produto_id'];
-    $quantidade = (float)$_POST['quantidade'];
-    $origem_id = (int)$_POST['local_origem_id'];
-    $destino_id = (int)$_POST['local_destino_id'];
+// Se admin_unidade, restringe aos produtos que têm estoque na unidade
+if ($filtro_unidade && !empty($ids_permitidos)) {
+    $idsStr = implode(',', array_map('intval', $ids_permitidos));
+    $sql_produtos = "
+        SELECT DISTINCT p.id AS produto_id, p.nome
+        FROM produtos p
+        WHERE p.deletado = FALSE
+          AND EXISTS (
+             SELECT 1 FROM estoques e
+             WHERE e.produto_id = p.id 
+               AND e.quantidade > 0
+               AND e.local_id IN ($idsStr)
+          )
+        ORDER BY p.nome
+    ";
+}
+
+$resp = $conn->query($sql_produtos);
+if ($resp) {
+    while ($r = $resp->fetch_assoc()) {
+        $produtos[] = $r;
+    }
+}
+
+// Carregar lista de destinos (locais)
+$locais_destino = [];
+if (function_exists('getLocaisFormatados')) {
+    $restricao = $filtro_unidade ? $filtro_unidade : null;
+    $locais_destino = getLocaisFormatados($conn, true, $restricao);
+} else {
+    $sql_l = "SELECT id, nome FROM locais WHERE deletado = FALSE";
+    if ($filtro_unidade && !empty($ids_permitidos)) {
+        $idsStr = implode(',', array_map('intval', $ids_permitidos));
+        $sql_l .= " AND id IN ($idsStr)";
+    }
+    $sql_l .= " ORDER BY nome";
+    $r2 = $conn->query($sql_l);
+    if ($r2) while ($row = $r2->fetch_assoc()) $locais_destino[$row['id']] = $row['nome'];
+}
+
+// --- PROCESSAR SUBMIT: criar movimentação ---
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['acao']) && $_POST['acao'] === 'solicitar') {
+    $produto_id = isset($_POST['produto_id']) ? (int)$_POST['produto_id'] : 0;
+    $origem_id = isset($_POST['local_origem_id']) ? (int)$_POST['local_origem_id'] : 0;
+    $destino_id = isset($_POST['local_destino_id']) ? (int)$_POST['local_destino_id'] : 0;
+    $quantidade = 1; // fixo (cada movimentação = 1)
     
-    // Validar campos básicos
-    if ($produto_id <= 0 || $quantidade <= 0 || $origem_id <= 0 || $destino_id <= 0) {
-        $status_message = "<div class='alert error'>Preencha todos os campos corretamente.</div>";
+    if ($produto_id <= 0 || $origem_id <= 0 || $destino_id <= 0) {
+        $status_message = "<div class='alert error'>Selecione o produto, origem e destino corretamente.</div>";
     } else {
-        // Se for admin_unidade, valida que a origem pertence à sua unidade.
-        if ($filtro_unidade) {
-            $ids_perm = getIdsLocaisDaUnidade($conn, $filtro_unidade);
-            if (!in_array($origem_id, $ids_perm)) {
-                $status_message = "<div class='alert error'>Origem inválida: você só pode solicitar retiradas de locais da sua unidade.</div>";
-            }
-            // Destino pode ser fora da unidade (cross-unit request) — será autorizado por admin geral e recebido pelo admin da unidade destino.
-        }
+        // Validar se o produto tem estoque na origem
+        $stmt_check = $conn->prepare("SELECT quantidade FROM estoques WHERE produto_id = ? AND local_id = ? LIMIT 1");
+        $stmt_check->bind_param("ii", $produto_id, $origem_id);
+        $stmt_check->execute();
+        $check = $stmt_check->get_result()->fetch_assoc();
+        $stmt_check->close();
 
-        if (empty($status_message)) {
-            if ($origem_id == $destino_id) {
-                $status_message = "<div class='alert error'>Origem e destino iguais.</div>";
-            } else {
-                // Verificar saldo disponível no local de origem antes de criar a movimentação
-                $saldo_disp = getSaldoDisponivel($conn, $produto_id, $origem_id);
-                // Considera pequena tolerância para floats
-                if ($quantidade > $saldo_disp + 0.00001) {
-                    $status_message = "<div class='alert error'>Estoque insuficiente. Saldo disponível no local de origem: " . number_format($saldo_disp, 4, ',', '.') . "</div>";
-                } else {
-                    // Inserir movimentação como PENDENTE
+        if (!$check || $check['quantidade'] <= 0) {
+            $status_message = "<div class='alert error'>Produto não possui estoque neste local.</div>";
+        } elseif ($origem_id === $destino_id) {
+            $status_message = "<div class='alert error'>Origem e destino não podem ser o mesmo local.</div>";
+        } else {
+            // Validações de permissão para admin_unidade
+            if ($filtro_unidade && !empty($ids_permitidos)) {
+                if (!in_array($origem_id, $ids_permitidos)) {
+                    $status_message = "<div class='alert error'>Você não tem permissão sobre o local de origem.</div>";
+                } elseif (!in_array($destino_id, $ids_permitidos)) {
+                    $status_message = "<div class='alert error'>Você não tem permissão sobre o local de destino.</div>";
+                }
+            }
+
+            if (empty($status_message)) {
+                $conn->begin_transaction();
+                try {
                     $stmt = $conn->prepare("INSERT INTO movimentacoes (produto_id, quantidade, local_origem_id, local_destino_id, usuario_id, status, tipo_movimentacao) VALUES (?, ?, ?, ?, ?, 'pendente', 'TRANSFERENCIA')");
-                    $stmt->bind_param("idiii", $produto_id, $quantidade, $origem_id, $destino_id, $usuario_id);
+                    $stmt->bind_param("iiiii", $produto_id, $quantidade, $origem_id, $destino_id, $usuario_id);
                     if ($stmt->execute()) {
+                        if (function_exists('registrarLog')) {
+                            registrarLog($conn, $usuario_id, 'movimentacoes', $stmt->insert_id, 'SOLICITACAO', "Movimentação de $quantidade un.", $produto_id);
+                        }
+                        $conn->commit();
                         $status_message = "<div class='alert success'>Solicitação enviada com sucesso!</div>";
-                        if(function_exists('registrarLog')) registrarLog($conn, $usuario_id, 'movimentacoes', $stmt->insert_id, 'SOLICITACAO', "Qtd: $quantidade", $produto_id);
                     } else {
-                        $status_message = "<div class='alert error'>Erro: " . htmlspecialchars($conn->error) . "</div>";
+                        $conn->rollback();
+                        $status_message = "<div class='alert error'>Erro ao salvar solicitação.</div>";
                     }
                     $stmt->close();
+                } catch (Exception $e) {
+                    if ($conn->in_transaction) $conn->rollback();
+                    $status_message = "<div class='alert error'>Erro: " . htmlspecialchars($e->getMessage()) . "</div>";
                 }
             }
         }
@@ -152,153 +181,110 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['acao']) && $_POST['aca
     <title>Solicitar Movimentação</title>
     <link rel="stylesheet" href="../../assets/css/style.css">
     <style>
-        .container { max-width: 600px; margin: 40px auto; padding: 20px; background: #fff; border-radius: 8px; border: 1px solid #ddd; }
+        .container { max-width: 700px; margin: 40px auto; padding: 20px; background: #fff; border-radius: 8px; border: 1px solid #ddd; }
         .form-group { margin-bottom: 15px; }
         label { display: block; font-weight: bold; margin-bottom: 5px; }
-        select, input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        select, input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
         .error { background: #f8d7da; color: #721c24; }
         .success { background: #d4edda; color: #155724; }
-        button { width: 100%; padding: 12px; background: #28a745; color: white; border: none; cursor: pointer; border-radius: 4px; }
-        .small-note { font-size: 0.9em; color: #666; margin-top:6px; display:block; }
-        #saldo-origem { font-weight: bold; margin-left: 6px; color: #155724; }
+        button { width: 100%; padding: 12px; background: #28a745; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #218838; }
+        .small-note { font-size: 0.9em; color: #666; margin-top: 6px; display: block; }
+        .origem-display { font-weight: bold; color: #155724; margin-top: 6px; padding: 8px; background: #f0f0f0; border-radius: 4px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Nova Solicitação</h1>
+        <h1>Nova Solicitação de Movimentação</h1>
         <?php echo $status_message; ?>
+
         <form method="POST" id="form-solicitar">
             <input type="hidden" name="acao" value="solicitar">
-            
+            <input type="hidden" name="local_origem_id" id="local_origem_id" value="">
+
             <div class="form-group">
-                <label>Produto</label>
+                <label for="produto_id">Produto <span style="color:red">*</span></label>
                 <select name="produto_id" id="produto_id" required>
-                    <option value="">Selecione...</option>
-                    <?php foreach ($produtos as $p) echo "<option value='{$p['id']}'>".htmlspecialchars($p['nome'])."</option>"; ?>
+                    <option value="">Selecione um produto...</option>
+                    <?php foreach ($produtos as $pr): ?>
+                        <option value="<?php echo (int)$pr['produto_id']; ?>">
+                            <?php echo htmlspecialchars($pr['nome']); ?>
+                        </option>
+                    <?php endforeach; ?>
                 </select>
+                <span class="small-note">Selecione o produto que deseja movimentar.</span>
             </div>
-            
+
             <div class="form-group">
-                <label>Quantidade</label>
-                <input type="number" name="quantidade" id="quantidade" min="0.01" step="any" value="1" required>
+                <label>Localização Atual</label>
+                <div class="origem-display">
+                    <span id="origem-text">—</span>
+                </div>
             </div>
-            
+
             <div class="form-group">
-                <label>Origem</label>
-                <select name="local_origem_id" id="local_origem_id" required>
-                    <option value="">Selecione...</option>
-                    <?php foreach ($locais_origem as $id => $nome) echo "<option value='$id'>".htmlspecialchars($nome)."</option>"; ?>
-                </select>
-                <span class="small-note">Saldo disponível neste local: <span id="saldo-origem">-</span></span>
-                <?php if ($filtro_unidade): ?>
-                    <small style="color:#666">Você só pode escolher locais da sua unidade como origem.</small>
-                <?php endif; ?>
-            </div>
-            
-            <div class="form-group">
-                <label>Destino</label>
+                <label for="local_destino_id">Local de Destino <span style="color:red">*</span></label>
                 <select name="local_destino_id" id="local_destino_id" required>
                     <option value="">Selecione...</option>
-                    <?php foreach ($locais_destino as $id => $nome) echo "<option value='$id'>".htmlspecialchars($nome)."</option>"; ?>
+                    <?php foreach ($locais_destino as $id => $nome): ?>
+                        <option value="<?php echo $id; ?>"><?php echo htmlspecialchars($nome); ?></option>
+                    <?php endforeach; ?>
                 </select>
-                <?php if ($filtro_unidade): ?>
-                    <small style="color:#666">Destino pode ser na sua unidade ou em outra unidade.</small>
-                <?php endif; ?>
             </div>
-            
-            <button type="submit">Enviar</button>
+
+            <button type="submit">Enviar Solicitação</button>
         </form>
-        <p style="text-align:center"><a href="listar.php">Voltar</a></p>
+
+        <p style="text-align:center; margin-top:12px;"><a href="listar.php">Voltar</a></p>
     </div>
 
 <script>
-// JS para: 1) buscar saldo via GET e exibir; 2) remover origem das opções de destino para evitar mesmo local; 3) validação cliente opcional
+(function(){
+    const produtoSel = document.getElementById('produto_id');
+    const origemText = document.getElementById('origem-text');
+    const origemHidden = document.getElementById('local_origem_id');
+    const destinoSel = document.getElementById('local_destino_id');
 
-const produtoSel = document.getElementById('produto_id');
-const origemSel = document.getElementById('local_origem_id');
-const destinoSel = document.getElementById('local_destino_id');
-const saldoSpan = document.getElementById('saldo-origem');
+    // Ao selecionar um produto, carrega os locais onde ele tem estoque
+    produtoSel.addEventListener('change', async function() {
+        const pid = this.value;
+        origemText.textContent = '—';
+        origemHidden.value = '';
+        
+        if (!pid) return;
 
-function atualizarDestinoExclusao() {
-    const origemVal = origemSel.value;
-    // reabilita todas as opções primeiro
-    for (const opt of destinoSel.options) {
-        opt.disabled = false;
-        opt.style.display = '';
-    }
-    if (origemVal) {
-        // desabilita / oculta a opção do mesmo local
-        const opt = destinoSel.querySelector('option[value="' + origemVal + '"]');
-        if (opt) {
-            opt.disabled = true;
-            opt.style.display = 'none';
-            // se estava selecionado, limpa seleção
-            if (destinoSel.value === origemVal) destinoSel.value = '';
-        }
-    }
-}
-
-async function buscarSaldo() {
-    const prod = produtoSel.value;
-    const loc = origemSel.value;
-    saldoSpan.textContent = '-';
-    if (!prod || !loc) return;
-    try {
-        const res = await fetch(`?acao=saldo&produto_id=${encodeURIComponent(prod)}&local_id=${encodeURIComponent(loc)}`);
-        const data = await res.json();
-        if (data && data.sucesso) {
-            // formata exibindo com vírgula e até 4 casas (br)
-            const val = Number(data.saldo);
-            saldoSpan.textContent = val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
-        } else {
-            saldoSpan.textContent = '0';
-        }
-    } catch (e) {
-        console.error(e);
-        saldoSpan.textContent = '-';
-    }
-}
-
-// Event listeners
-produtoSel.addEventListener('change', function() {
-    // quando trocar produto, atualizar saldo se origem já selecionada
-    if (origemSel.value) buscarSaldo();
-});
-origemSel.addEventListener('change', function() {
-    atualizarDestinoExclusao();
-    buscarSaldo();
-});
-
-// Inicializa ao carregar
-document.addEventListener('DOMContentLoaded', function() {
-    atualizarDestinoExclusao();
-    // se já houver valores pré-selecionados (após submit com erro), tenta buscar saldo
-    if (produtoSel.value && origemSel.value) buscarSaldo();
-});
-
-// Adicional: checagem cliente antes do envio para evitar round-trip quando o saldo já é insuficiente
-document.getElementById('form-solicitar').addEventListener('submit', async function(e) {
-    const prod = produtoSel.value;
-    const loc = origemSel.value;
-    const qtd = parseFloat(document.getElementById('quantidade').value) || 0;
-    if (prod && loc && qtd > 0) {
-        // busca saldo atual
         try {
-            const res = await fetch(`?acao=saldo&produto_id=${encodeURIComponent(prod)}&local_id=${encodeURIComponent(loc)}`);
+            const res = await fetch(`?acao=locais_produto&produto_id=${encodeURIComponent(pid)}`);
             const data = await res.json();
-            const saldo = (data && data.sucesso) ? Number(data.saldo) : 0;
-            if (qtd > saldo + 0.00001) {
-                e.preventDefault();
-                alert('Estoque insuficiente. Saldo disponível: ' + saldo.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 }));
-                return false;
+            
+            if (!data.sucesso || !data.locais || data.locais.length === 0) {
+                origemText.textContent = 'Nenhum estoque encontrado para este produto';
+                return;
+            }
+
+            // Pega o primeiro local com estoque e exibe
+            const primeiro = data.locais[0];
+            origemText.textContent = primeiro.local_nome + ' (' + primeiro.quantidade + ' un.)';
+            origemHidden.value = primeiro.local_id;
+
+            // Remove este local das opções de destino
+            for (const opt of destinoSel.options) {
+                opt.disabled = false;
+                opt.style.display = '';
+            }
+            const same = destinoSel.querySelector(`option[value="${primeiro.local_id}"]`);
+            if (same) {
+                same.disabled = true;
+                same.style.display = 'none';
+                if (destinoSel.value === String(primeiro.local_id)) destinoSel.value = '';
             }
         } catch (err) {
-            // se falhar a checagem, deixamos o submit seguir para validação server-side
-            console.error('Erro ao verificar saldo (cliente):', err);
+            console.error(err);
+            origemText.textContent = 'Erro ao carregar locais';
         }
-    }
-});
+    });
+})();
 </script>
 </body>
 </html>

@@ -8,8 +8,6 @@ $unidade_id = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : nu
 $filtro_unidade = ($nivel_usuario === 'admin_unidade') ? $unidade_id : null;
 
 // 1. Carregar Produtos (que podem ser Kits)
-// Para admin_unidade, podemos opcionalmente limitar os produtos que aparecem (por exemplo, produtos que tenham componentes nesta unidade).
-// Para simplicidade deixamos listar todos os produtos; se quiser, posso restringir aqui também.
 $produtos = [];
 $sql_prod = "SELECT id, nome FROM produtos WHERE deletado = FALSE ORDER BY nome";
 $res_prod = $conn->query($sql_prod);
@@ -18,11 +16,9 @@ while ($row = $res_prod->fetch_assoc()) {
 }
 
 // 2. Carregar Locais (Onde o Kit montado será guardado)
-// Se admin_unidade, listar apenas locais da unidade; senão listar todos.
 if (function_exists('getLocaisFormatados')) {
     $locais = getLocaisFormatados($conn, true, $filtro_unidade);
 } else {
-    // Fallback simples
     $res_loc = $conn->query("SELECT id, nome FROM locais WHERE deletado = FALSE ORDER BY nome");
     $locais = [];
     while ($r = $res_loc->fetch_assoc()) $locais[$r['id']] = $r['nome'];
@@ -80,11 +76,6 @@ if (function_exists('getLocaisFormatados')) {
             </select>
         </div>
 
-        <div class="form-group">
-            <label>Quantidade a Produzir:</label>
-            <input type="number" id="quantidade" value="1" min="1">
-        </div>
-
         <div class="form-group" style="flex: 2;">
             <label>Local de Destino (Onde guardar o Kit):</label>
             <select id="local_id">
@@ -100,8 +91,8 @@ if (function_exists('getLocaisFormatados')) {
     </div>
 
     <div style="text-align: right;">
-        <button type="button" class="btn-action btn-check" onclick="simularMontagem()">1. Verificar Componentes</button>
-        <button type="button" class="btn-action btn-assemble" id="btn-montar" onclick="executarMontagem()">2. Confirmar Montagem</button>
+        <button type="button" class="btn-action btn-check" onclick="simularMontagem()">1. Verificar Componentes (para 1 unidade)</button>
+        <button type="button" class="btn-action btn-assemble" id="btn-montar" onclick="executarMontagem()">2. Confirmar Montagem (1 unidade)</button>
     </div>
 
     <div id="preview-area">
@@ -135,22 +126,20 @@ if (function_exists('getLocaisFormatados')) {
 
     async function simularMontagem() {
         const prodId = document.getElementById('produto_id').value;
-        const qtd = parseFloat(document.getElementById('quantidade').value);
+        const qtd = 1; // fixed to 1
 
-        if (!prodId || qtd <= 0) {
-            alert("Selecione um produto e uma quantidade válida.");
+        if (!prodId) {
+            alert("Selecione um produto.");
             return;
         }
 
-        // Reset visual
         previewArea.style.display = 'block';
         previewBody.innerHTML = '<tr><td colspan="5">Carregando estrutura...</td></tr>';
         feedbackMsg.innerHTML = '';
         btnMontar.style.display = 'none';
 
         try {
-            // 1. Buscar a estrutura do Kit (Componentes)
-            const resComp = await fetch(`../../api/componentes.php?id=${prodId}`);
+            const resComp = await fetch(`../../api/componentes.php?produto_id=${prodId}&unidades=${qtd}`);
             const dataComp = await resComp.json();
 
             if (!dataComp.sucesso) {
@@ -158,20 +147,18 @@ if (function_exists('getLocaisFormatados')) {
                 return;
             }
 
-            if (!dataComp.explosao_flat || dataComp.explosao_flat.length === 0) {
+            if (!dataComp.data || !dataComp.data.componentes || dataComp.data.componentes.length === 0) {
                 previewBody.innerHTML = `<tr><td colspan="5" style="color:orange">Este produto não possui componentes cadastrados (Não é um kit).</td></tr>`;
                 return;
             }
 
-            // 2. Renderizar Tabela e Verificar Saldos
             let html = '';
             let podeMontar = true;
 
-            // explosao_flat traz: produto_id, nome, quantidade_total (para 1un do pai), estoque_total
-            for (const comp of dataComp.explosao_flat) {
-                const qtdNecessaria = (parseFloat(comp.quantidade_total) * qtd).toFixed(2);
-                const estoqueAtual = parseFloat(comp.estoque_total);
-                
+            for (const comp of dataComp.data.componentes) {
+                const qtdNecessaria = parseFloat(comp.quantidade_total || comp.quantidade_por_unidade || 0).toFixed(2);
+                const estoqueAtual = parseFloat(comp.available || comp.total_stock || 0);
+
                 let statusClass = 'status-ok';
                 let statusTexto = 'OK';
 
@@ -184,7 +171,7 @@ if (function_exists('getLocaisFormatados')) {
                 html += `
                     <tr>
                         <td>${comp.nome}</td>
-                        <td>${parseFloat(comp.quantidade_total).toFixed(2)}</td>
+                        <td>${parseFloat(comp.quantidade_por_unidade || 0).toFixed(2)}</td>
                         <td><strong>${qtdNecessaria}</strong></td>
                         <td>${estoqueAtual}</td>
                         <td class="${statusClass}">${statusTexto}</td>
@@ -195,7 +182,7 @@ if (function_exists('getLocaisFormatados')) {
             previewBody.innerHTML = html;
 
             if (podeMontar) {
-                feedbackMsg.innerHTML = '<div class="summary-box" style="background:#d4edda; color:#155724; border-color:#c3e6cb">Tudo pronto! Estoque suficiente para a produção.</div>';
+                feedbackMsg.innerHTML = '<div class="summary-box" style="background:#d4edda; color:#155724; border-color:#c3e6cb">Tudo pronto! Estoque suficiente para a produção de 1 unidade.</div>';
                 btnMontar.style.display = 'inline-block';
             } else {
                 feedbackMsg.innerHTML = '<div class="summary-box" style="background:#f8d7da; color:#721c24; border-color:#f5c6cb">Estoque insuficiente de componentes. Não é possível montar.</div>';
@@ -209,20 +196,19 @@ if (function_exists('getLocaisFormatados')) {
 
     async function executarMontagem() {
         const prodId = document.getElementById('produto_id').value;
-        const qtd = document.getElementById('quantidade').value;
+        const qtd = 1; // fixed
         const localId = document.getElementById('local_id').value;
 
         if (!confirm(`Confirma a produção de ${qtd} unidade(s)? Isso descontará os componentes do estoque.`)) return;
 
-        // Feedback visual de carregamento
         btnMontar.disabled = true;
         btnMontar.innerText = "Processando...";
 
         const formData = new FormData();
         formData.append('produto_id', prodId);
         formData.append('quantidade', qtd);
-        formData.append('local_id', localId); // Onde o Kit será guardado
-        formData.append('action', 'assemble'); // Ação de montagem
+        formData.append('local_id', localId);
+        formData.append('action', 'assemble');
         formData.append('usuario_id', usuarioId);
 
         try {
@@ -234,17 +220,17 @@ if (function_exists('getLocaisFormatados')) {
 
             if (data.sucesso) {
                 alert("Sucesso! " + data.mensagem);
-                window.location.href = '../produtos/listar.php?sucesso=montagem'; // Redireciona para ver o estoque
+                window.location.href = '../produtos/listar.php?sucesso=montagem';
             } else {
                 alert("Erro: " + data.mensagem);
                 btnMontar.disabled = false;
-                btnMontar.innerText = "2. Confirmar Montagem";
+                btnMontar.innerText = "2. Confirmar Montagem (1 unidade)";
             }
         } catch (error) {
             alert("Erro fatal ao processar montagem.");
             console.error(error);
             btnMontar.disabled = false;
-            btnMontar.innerText = "2. Confirmar Montagem";
+            btnMontar.innerText = "2. Confirmar Montagem (1 unidade)";
         }
     }
 </script>

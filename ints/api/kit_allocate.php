@@ -1,263 +1,143 @@
 <?php
 require_once '../config/_protecao.php';
-header('Content-Type: application/json;charset=utf-8');
+header('Content-Type: application/json; charset=utf-8');
 
-function respond($payload, $code = 200) {
+function respondJson($payload, $code = 200) {
     http_response_code($code);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-// Input
-$produto_id = isset($_POST['produto_id']) ? (int)$_POST['produto_id'] : 0;
-$quant = isset($_POST['quantidade']) ? (float)$_POST['quantidade'] : 1.0;
-$local_id = isset($_POST['local_id']) ? (int)$_POST['local_id'] : 0;
-$action = isset($_POST['action']) ? strtolower($_POST['action']) : 'reserve';
-$usuario_id = isset($_POST['usuario_id']) ? (int)$_POST['usuario_id'] : null;
-$dry_run = isset($_POST['dry_run']) && $_POST['dry_run'] == '1';
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') respondJson(['sucesso'=>false,'mensagem'=>'Use POST com JSON payload'], 405);
 
-if ($produto_id <= 0 || $quant <= 0) respond(['sucesso' => false, 'mensagem' => 'produto_id e quantidade válidos são obrigatórios.'], 400);
-if (!in_array($action, ['reserve','assemble'])) respond(['sucesso'=>false,'mensagem'=>'action inválida.'], 400);
-if ($action === 'assemble' && $local_id <= 0) respond(['sucesso'=>false,'mensagem'=>'assemble exige local_id.'], 400);
+$raw = file_get_contents('php://input');
+$data = json_decode($raw, true);
+if (!is_array($data)) respondJson(['sucesso'=>false,'mensagem'=>'JSON inválido ou ausente'], 400);
 
-// Ensure connection charset
-$conn->set_charset("utf8mb4");
+$allocations = $data['allocations'] ?? null;
+if (!is_array($allocations) || empty($allocations)) respondJson(['sucesso'=>false,'mensagem'=>'allocations é obrigatório e deve ser um array'], 400);
 
-// Try to use existing explodeBomFlat if present; otherwise define local version
-if (!function_exists('explodeBomFlat')) {
-    function explodeBomFlat($conn, $rootId, $multiplier = 1.0, &$flat = [], $depth = 0, $visited = [], $maxDepth = 12) {
-        if ($depth > $maxDepth) throw new Exception("Profundidade máxima ao explodir BOM.");
-        if (in_array($rootId, $visited)) throw new Exception("Ciclo detectado na composição (produto $rootId).");
-        $visited[] = $rootId;
+$referencia_tipo = isset($data['referencia_tipo']) && $data['referencia_tipo'] !== '' ? $data['referencia_tipo'] : 'manual_alloc';
+$referencia_id = isset($data['referencia_id']) ? (is_numeric($data['referencia_id']) ? intval($data['referencia_id']) : null) : null;
+$referencia_batch = isset($data['referencia_batch']) && $data['referencia_batch'] !== '' ? $data['referencia_batch'] : null;
+$usuario_id = isset($data['usuario_id']) ? (int)$data['usuario_id'] : null;
+$format = isset($data['format']) ? strtolower($data['format']) : 'pdf';
 
-        $sql = "SELECT pr.subproduto_id, pr.quantidade FROM produto_relacionamento pr WHERE pr.produto_principal_id = ?";
-        $stmt = $conn->prepare($sql);
-        if (!$stmt) throw new Exception("Erro ao preparar explodeBomFlat: " . $conn->error);
-        $stmt->bind_param("i", $rootId);
-        $stmt->execute();
-        $res = $stmt->get_result();
-        $hasChild = false;
-        while ($row = $res->fetch_assoc()) {
-            $hasChild = true;
-            $sid = (int)$row['subproduto_id'];
-            $qty = (float)$row['quantidade'] * (float)$multiplier;
+$conn->set_charset('utf8mb4');
 
-            // check if sid has children
-            $stmt_check = $conn->prepare("SELECT COUNT(*) AS c FROM produto_relacionamento WHERE produto_principal_id = ?");
-            $stmt_check->bind_param("i", $sid);
-            $stmt_check->execute();
-            $rc = $stmt_check->get_result()->fetch_assoc();
-            $stmt_check->close();
-
-            if ($rc && (int)$rc['c'] > 0) {
-                explodeBomFlat($conn, $sid, $qty, $flat, $depth + 1, $visited, $maxDepth);
-            } else {
-                if (!isset($flat[$sid])) $flat[$sid] = 0.0;
-                $flat[$sid] += $qty;
-            }
-        }
-        $stmt->close();
-
-        if (!$hasChild) {
-            if (!isset($flat[$rootId])) $flat[$rootId] = 0.0;
-            $flat[$rootId] += $multiplier;
-        }
-        return $flat;
-    }
-}
-
-// Helper: compute available stock at local considering existing reservations
-function get_available_at_local($conn, $produtoId, $localId) {
-    // Lock estoque row
-    $stmt = $conn->prepare("SELECT quantidade FROM estoques WHERE produto_id = ? AND local_id = ? FOR UPDATE");
-    $stmt->bind_param("ii", $produtoId, $localId);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    $stock = $row ? (float)$row['quantidade'] : 0.0;
-
-    // Sum reservations for that product/local (lock rows)
-    $stmt2 = $conn->prepare("SELECT COALESCE(SUM(quantidade),0) AS reservado FROM reservas WHERE produto_id = ? AND local_id = ? FOR UPDATE");
-    $stmt2->bind_param("ii", $produtoId, $localId);
-    $stmt2->execute();
-    $rrow = $stmt2->get_result()->fetch_assoc();
-    $stmt2->close();
-    $reserved = $rrow ? (float)$rrow['reservado'] : 0.0;
-
-    return max(0.0, $stock - $reserved);
-}
-
-// Helper: select all estoque rows for product and lock them (for allocation)
-function lock_estoque_rows_for_product($conn, $produtoId) {
-    $stmt = $conn->prepare("SELECT local_id, quantidade FROM estoques WHERE produto_id = ? FOR UPDATE");
-    $stmt->bind_param("i", $produtoId);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    $rows = [];
-    while ($r = $res->fetch_assoc()) $rows[] = $r;
-    $stmt->close();
-    return $rows;
-}
-
-// Begin transaction
 try {
     $conn->begin_transaction();
 
-    // Explode BOM for required quantity
-    $flat = [];
-    explodeBomFlat($conn, $produto_id, $quant, $flat, 0, []);
-
-    if (empty($flat)) {
-        // no components: nothing to allocate/reserve
-        $conn->commit();
-        respond(['sucesso' => true, 'mensagem' => 'Produto sem componentes. Nada a reservar/consumir.', 'alloc' => []]);
+    if (empty($referencia_batch)) {
+        $referencia_batch = 'batch_' . time() . '_' . random_int(1000,9999);
     }
 
-    $allocations = []; // [ ['produto_id'=>, 'local_id'=>, 'qtd'=>], ... ]
-    $shortages = [];
+    $applied = [];
 
-    foreach ($flat as $compId => $qtyRequired) {
-        $qtyReq = (float)$qtyRequired;
+    // Prepare statements
+    $stmt_with_local = $conn->prepare(
+        "INSERT INTO reservas (produto_id, local_id, quantidade, referencia_tipo, referencia_id, referencia_batch, criado_por)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantidade = quantidade + VALUES(quantidade), data_criado = NOW(), criado_por = VALUES(criado_por)"
+    );
+    if (!$stmt_with_local) throw new Exception("Erro prepare reservas (with local): " . $conn->error);
 
-        if ($local_id > 0) {
-            // lock estoque row and reservation row
-            $avail = get_available_at_local($conn, $compId, $local_id);
-            if ($avail < $qtyReq) {
-                $shortages[] = ['produto_id' => $compId, 'required' => $qtyReq, 'available' => $avail];
-                continue;
-            }
-            $allocations[] = ['produto_id' => $compId, 'local_id' => $local_id, 'qtd' => $qtyReq];
-            continue;
+    $stmt_null_local = $conn->prepare(
+        "INSERT INTO reservas (produto_id, local_id, quantidade, referencia_tipo, referencia_id, referencia_batch, criado_por)
+         VALUES (?, NULL, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantidade = quantidade + VALUES(quantidade), data_criado = NOW(), criado_por = VALUES(criado_por)"
+    );
+    if (!$stmt_null_local) throw new Exception("Erro prepare reservas (null local): " . $conn->error);
+
+    foreach ($allocations as $a) {
+        $produto_id = isset($a['produto_id']) ? intval($a['produto_id']) : 0;
+        $local_id = array_key_exists('local_id', $a) ? ($a['local_id'] === null ? null : intval($a['local_id'])) : null;
+        $qtd = isset($a['qtd']) ? floatval($a['qtd']) : 0.0;
+        $patrimonio_id = isset($a['patrimonio_id']) ? (intval($a['patrimonio_id']) ?: null) : null;
+
+        if ($patrimonio_id) {
+            // resolve product and force qty = 1
+            $stp = $conn->prepare("SELECT produto_id FROM patrimonios WHERE id = ? LIMIT 1");
+            $stp->bind_param("i", $patrimonio_id);
+            $stp->execute();
+            $rp = $stp->get_result()->fetch_assoc();
+            $stp->close();
+            if (!$rp) { $conn->rollback(); respondJson(['sucesso'=>false,'mensagem'=>"Patrimônio id {$patrimonio_id} não encontrado"], 404); }
+            $produto_id = intval($rp['produto_id']);
+            $refType = 'patrimonio';
+            $refId = $patrimonio_id;
+            $qtd = 1.0;
+        } else {
+            $refType = $referencia_tipo;
+            $refId = $referencia_id;
+            if ($qtd <= 0) $qtd = 1.0;
         }
 
-        // No local specified: auto-distribute across available locations
-        $rows = lock_estoque_rows_for_product($conn, $compId);
-        // compute available per local (subtract reservations)
-        $needed = $qtyReq;
-        // If no estoque rows, available is zero
-        if (empty($rows)) {
-            $shortages[] = ['produto_id'=>$compId,'required'=>$qtyReq,'available'=>0];
-            continue;
+        if ($produto_id <= 0) continue;
+
+        if (is_null($local_id)) {
+            $stmt_null_local->bind_param("idssis", $produto_id, $qtd, $refType, $refId, $referencia_batch, $usuario_id);
+            $stmt_null_local->execute();
+            if ($stmt_null_local->error) { $conn->rollback(); respondJson(['sucesso'=>false,'mensagem'=>'Erro insert reserva (null local): '.$stmt_null_local->error],500); }
+        } else {
+            $stmt_with_local->bind_param("iidsisi", $produto_id, $local_id, $qtd, $refType, $refId, $referencia_batch, $usuario_id);
+            $stmt_with_local->execute();
+            if ($stmt_with_local->error) { $conn->rollback(); respondJson(['sucesso'=>false,'mensagem'=>'Erro insert reserva (with local): '.$stmt_with_local->error],500); }
         }
 
-        // sort rows by quantidade desc (greedy)
-        usort($rows, function($a,$b){ return ((float)$b['quantidade'] <=> (float)$a['quantidade']); });
-
-        foreach ($rows as $r) {
-            if ($needed <= 0) break;
-            $lid = (int)$r['local_id'];
-            // compute reserved for this product/local
-            $stmt = $conn->prepare("SELECT COALESCE(SUM(quantidade),0) AS reservado FROM reservas WHERE produto_id = ? AND local_id = ? FOR UPDATE");
-            $stmt->bind_param("ii", $compId, $lid);
-            $stmt->execute();
-            $rr = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            $reserved = $rr ? (float)$rr['reservado'] : 0.0;
-            $available = max(0.0, (float)$r['quantidade'] - $reserved);
-            if ($available <= 0) continue;
-            $take = min($needed, $available);
-            $allocations[] = ['produto_id' => $compId, 'local_id' => $lid, 'qtd' => $take];
-            $needed -= $take;
-        }
-
-        if ($needed > 0) {
-            // shortage
-            // compute total available
-            $totalAvailable = 0.0;
-            foreach ($rows as $r) {
-                $lid = (int)$r['local_id'];
-                $stmt = $conn->prepare("SELECT COALESCE(SUM(quantidade),0) AS reservado FROM reservas WHERE produto_id = ? AND local_id = ? FOR UPDATE");
-                $stmt->bind_param("ii", $compId, $lid);
-                $stmt->execute();
-                $rr = $stmt->get_result()->fetch_assoc();
-                $stmt->close();
-                $reserved = $rr ? (float)$rr['reservado'] : 0.0;
-                $totalAvailable += max(0.0, (float)$r['quantidade'] - $reserved);
-            }
-            $shortages[] = ['produto_id'=>$compId,'required'=>$qtyReq,'available'=>$totalAvailable];
-        }
+        $applied[] = ['produto_id'=>$produto_id,'local_id'=>$local_id,'qtd'=>$qtd,'ref'=>$refType.':'.$refId];
     }
 
-    if (!empty($shortages)) {
-        $conn->rollback();
-        respond(['sucesso'=>false,'mensagem'=>'Estoque insuficiente para alguns componentes.','shortages'=>$shortages], 409);
+    $stmt_with_local->close();
+    $stmt_null_local->close();
+
+    $conn->commit();
+
+    // Build picklist grouping
+    $grouped = [];
+    foreach ($applied as $it) {
+        $key = $it['produto_id'] . '::' . ($it['local_id'] === null ? 'null' : $it['local_id']);
+        if (!isset($grouped[$key])) $grouped[$key] = ['produto_id'=>$it['produto_id'],'local_id'=>$it['local_id'],'quantidade'=>0.0];
+        $grouped[$key]['quantidade'] += $it['qtd'];
     }
 
-    // If dry_run, return allocations suggestion (do not write DB)
-    if ($dry_run) {
-        $conn->rollback();
-        respond(['sucesso'=>true,'mensagem'=>'Dry run: alocação sugerida','alloc'=>$allocations]);
-    }
-
-    // Perform action
-    if ($action === 'reserve') {
-        // Insert reservations (ON DUPLICATE KEY UPDATE accumulate)
-        $stmtIns = $conn->prepare("INSERT INTO reservas (produto_id, local_id, quantidade, referencia_tipo, referencia_id, criado_por) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE quantidade = quantidade + VALUES(quantidade), data_criado = NOW(), criado_por = VALUES(criado_por)");
-        if (!$stmtIns) throw new Exception("Erro prepare insert reservas: " . $conn->error);
-        $refType = 'kit_reserva';
-        $refId = $produto_id; // grouping id; can be adjusted to a unique batch id if desired
-        foreach ($allocations as $a) {
-            $p = $a['produto_id']; $l = $a['local_id']; $q = $a['qtd'];
-            $stmtIns->bind_param("iiissi", $p, $l, $q, $refType, $refId, $usuario_id);
-            $stmtIns->execute();
+    $items = [];
+    // Fetch names
+    $prodNames = [];
+    $localNames = [];
+    foreach ($grouped as $g) {
+        $pid = $g['produto_id'];
+        $lid = $g['local_id'];
+        if (!isset($prodNames[$pid])) {
+            $s = $conn->prepare("SELECT nome FROM produtos WHERE id = ? LIMIT 1");
+            $s->bind_param("i", $pid);
+            $s->execute();
+            $r = $s->get_result()->fetch_assoc();
+            $s->close();
+            $prodNames[$pid] = $r['nome'] ?? "Produto $pid";
         }
-        $stmtIns->close();
-        $conn->commit();
-        respond(['sucesso'=>true,'mensagem'=>'Componentes reservados com sucesso','alloc'=>$allocations]);
+        if (!is_null($lid) && !isset($localNames[$lid])) {
+            $s2 = $conn->prepare("SELECT nome FROM locais WHERE id = ? LIMIT 1");
+            $s2->bind_param("i", $lid);
+            $s2->execute();
+            $r2 = $s2->get_result()->fetch_assoc();
+            $s2->close();
+            $localNames[$lid] = $r2['nome'] ?? "Local $lid";
+        }
+        $items[] = [
+            'produto_id' => $pid,
+            'nome' => $prodNames[$pid],
+            'local_id' => $lid,
+            'local_nome' => $lid === null ? 'Sem local' : ($localNames[$lid] ?? "Local $lid"),
+            'quantidade' => $g['quantidade']
+        ];
     }
 
-    // assemble
-    if ($action === 'assemble') {
-        // We required local_id earlier; allocations should reflect local_id allocations
-        // Decrement estoque for each allocation and create movimentacoes
-        $stmtUpd = $conn->prepare("UPDATE estoques SET quantidade = quantidade - ? WHERE produto_id = ? AND local_id = ?");
-        if (!$stmtUpd) throw new Exception("Erro prepare update estoques: " . $conn->error);
-        $stmtMov = $conn->prepare("INSERT INTO movimentacoes (produto_id, local_origem_id, local_destino_id, quantidade, usuario_id, status, tipo_movimentacao) VALUES (?, ?, ?, ?, ?, 'finalizado', 'COMPONENTE')");
-        if (!$stmtMov) throw new Exception("Erro prepare insert movimentacoes: " . $conn->error);
+    $meta = ['total_items' => count($items), 'total_quantity' => array_sum(array_column($items,'quantidade'))];
 
-        foreach ($allocations as $a) {
-            $p = $a['produto_id']; $l = $a['local_id']; $q = $a['qtd'];
-            // Update
-            $stmtUpd->bind_param("dis", $q, $p, $l);
-            $stmtUpd->execute();
-            if ($stmtUpd->affected_rows === 0) {
-                // This should not happen because we locked earlier, but check safety
-                throw new Exception("Falha ao decrementar estoque do produto $p no local $l.");
-            }
-            // Insert movement (origin = local, destination = null)
-            $dest = null;
-            $stmtMov->bind_param("iiidi", $p, $l, $dest, $q, $usuario_id);
-            $stmtMov->execute();
-        }
-        $stmtUpd->close();
-        $stmtMov->close();
-
-        // If assembled product controls stock, increment its stock at local_id
-        $stmtProd = $conn->prepare("SELECT controla_estoque_proprio FROM produtos WHERE id = ?");
-        $stmtProd->bind_param("i", $produto_id);
-        $stmtProd->execute();
-        $prodR = $stmtProd->get_result()->fetch_assoc();
-        $stmtProd->close();
-        if ((int)($prodR['controla_estoque_proprio'] ?? 0) === 1) {
-            // upsert into estoques
-            // ensure local_id provided
-            if ($local_id <= 0) throw new Exception("local_id é obrigatório para incrementar estoque do produto montado.");
-            $stmtUpsert = $conn->prepare("INSERT INTO estoques (produto_id, local_id, quantidade) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantidade = quantidade + VALUES(quantidade)");
-            $stmtUpsert->bind_param("iid", $produto_id, $local_id, $quant);
-            $stmtUpsert->execute();
-            $stmtUpsert->close();
-        }
-
-        $conn->commit();
-        respond(['sucesso'=>true,'mensagem'=>'Montagem efetuada e estoques atualizados','alloc'=>$allocations]);
-    }
-
-    // Shouldn't reach here
-    $conn->rollback();
-    respond(['sucesso'=>false,'mensagem'=>'Ação não executada.'], 500);
+    respondJson(['sucesso'=>true,'mensagem'=>'Reservations aplicadas','referencia_batch'=>$referencia_batch,'data'=>['items'=>$items,'meta'=>$meta]]);
 
 } catch (Exception $e) {
-    $conn->rollback();
-    respond(['sucesso'=>false,'mensagem' => $e->getMessage()]);
+    if ($conn->in_transaction) $conn->rollback();
+    respondJson(['sucesso'=>false,'mensagem'=>'Erro: '.$e->getMessage()], 500);
 }
-?>
