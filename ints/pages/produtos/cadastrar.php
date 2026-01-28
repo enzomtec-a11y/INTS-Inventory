@@ -12,19 +12,17 @@ if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
     $unidade_locais_ids = getIdsLocaisDaUnidade($conn, $usuario_unidade);
 }
 
-// Carregamentos básicos
-$categorias = [];
-$res = $conn->query("SELECT id, nome FROM categorias WHERE deletado = FALSE ORDER BY nome");
-if ($res) while ($r = $res->fetch_assoc()) $categorias[] = $r;
+// Carregamentos básicos - APENAS CATEGORIAS RAIZ INICIALMENTE
+$categorias_raiz = [];
+$res = $conn->query("SELECT id, nome FROM categorias WHERE deletado = FALSE AND categoria_pai_id IS NULL ORDER BY nome");
+if ($res) while ($r = $res->fetch_assoc()) $categorias_raiz[] = $r;
 
 // Use a função getLocaisFormatados para obter breadcrumb (Unidade > Andar > Sala).
-// Passamos true para retornar apenas salas (apenasSalas = true).
 $locais = [];
 if (function_exists('getLocaisFormatados')) {
     $restricao = ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) ? $usuario_unidade : null;
-    $locais = getLocaisFormatados($conn, true, $restricao); // retorna array id => 'Raiz > ... > Sala'
+    $locais = getLocaisFormatados($conn, true, $restricao);
 }
-// Fallback caso a função não exista ou retorne vazio
 if (empty($locais)) {
     $sql = "SELECT id, nome FROM locais WHERE deletado = FALSE";
     if (!empty($unidade_locais_ids)) {
@@ -36,7 +34,7 @@ if (empty($locais)) {
     if ($res) while ($r = $res->fetch_assoc()) $locais[$r['id']] = $r['nome'];
 }
 
-// Lista de produtos: se admin_unidade, limitar produtos que tenham estoque/patrimônio na unidade
+// Lista de produtos
 $produtos_lista = [];
 if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
     $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
@@ -110,7 +108,6 @@ function mapOpcaoParaValorPermitido($conn, $opcao_id) {
 function produtoPertenceUnidade($conn, $produto_id, $locais_ids) {
     if (empty($locais_ids)) return false;
     $idsStr = implode(',', array_map('intval', $locais_ids));
-    // Verifica estoques
     $sql = "SELECT 1 FROM estoques WHERE produto_id = ? AND local_id IN ($idsStr) LIMIT 1";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("i", $produto_id);
@@ -118,7 +115,6 @@ function produtoPertenceUnidade($conn, $produto_id, $locais_ids) {
     $r = $stmt->get_result();
     if ($r && $r->num_rows > 0) { $stmt->close(); return true; }
     $stmt->close();
-    // Verifica patrimonios
     $sql2 = "SELECT 1 FROM patrimonios WHERE produto_id = ? AND local_id IN ($idsStr) LIMIT 1";
     $stmt2 = $conn->prepare($sql2);
     $stmt2->bind_param("i", $produto_id);
@@ -132,7 +128,13 @@ function produtoPertenceUnidade($conn, $produto_id, $locais_ids) {
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $nome = trim($_POST['nome'] ?? '');
     $descricao = trim($_POST['descricao'] ?? '');
-    $categoria_id = (int)($_POST['categoria_id'] ?? 0);
+    
+    // NOVA LÓGICA: Categoria final é o último select preenchido
+    $categoria_id = 0;
+    if (!empty($_POST['categoria_final'])) {
+        $categoria_id = (int)$_POST['categoria_final'];
+    }
+    
     $local_id = (int)($_POST['local_id'] ?? 0);
     $quantidade_inicial = isset($_POST['quantidade_inicial']) ? (float)$_POST['quantidade_inicial'] : 0;
     $tipo_posse = $_POST['tipo_posse'] ?? 'proprio';
@@ -153,7 +155,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } elseif ($tipo_posse == 'locado' && empty($locador_nome)) {
         $status_message = "<p style='color:red'>Para produtos locados, o nome do locador é obrigatório.</p>";
     } else {
-        // Se é admin_unidade, valida o local escolhido (se fornecido)
         if ($usuario_nivel === 'admin_unidade' && $local_id > 0 && !in_array($local_id, $unidade_locais_ids)) {
             $status_message = "<p style='color:red'>Local inválido para sua unidade.</p>";
         } else {
@@ -169,7 +170,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 if (function_exists('registrarLog')) registrarLog($conn, $usuario_id_log, 'produtos', $produto_id, 'CRIACAO', "Produto criado via formulário (composição inline).", $produto_id);
 
                 if ($controla_estoque && $local_id && $quantidade_inicial > 0) {
-                    // Se admin_unidade, já validamos acima que local_id pertence à unidade
                     $stmt = $conn->prepare("INSERT INTO estoques (produto_id, local_id, quantidade) VALUES (?, ?, ?)");
                     $stmt->bind_param("iid", $produto_id, $local_id, $quantidade_inicial);
                     $stmt->execute();
@@ -269,6 +269,45 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .linha-comp { display:flex; gap:8px; margin-bottom:6px; align-items:center; }
         .btn-rmv { background:#e74c3c; color:#fff; border:none; padding:6px 8px; cursor:pointer; border-radius:3px; }
         .required-star { color: red; }
+        
+        /* Estilos para hierarquia de categorias */
+        #categoria-hierarchy-container { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px; 
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .categoria-level { 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+        }
+        .categoria-level label {
+            min-width: 100px;
+            margin: 0;
+        }
+        .categoria-level select {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .breadcrumb-display {
+            font-size: 0.9em;
+            color: #666;
+            padding: 8px;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            min-height: 20px;
+        }
+        .breadcrumb-display strong {
+            color: #333;
+        }
     </style>
 </head>
 <body>
@@ -282,7 +321,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 <label>Nome <span class="required-star">*</span></label>
                 <input type="text" name="nome" required>
             </div>
-
+            
             <div class="form-group">
                 <label>Descrição</label>
                 <textarea name="descricao"></textarea>
@@ -301,22 +340,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 <input type="text" name="locador_nome" id="locador_nome">
             </div>
 
+            <!-- NOVA SEÇÃO DE CATEGORIA HIERÁRQUICA -->
             <div class="form-group">
                 <label>Categoria <span class="required-star">*</span></label>
-                <select name="categoria_id" required>
-                    <option value="">Selecione...</option>
-                    <?php foreach ($categorias as $c): ?>
-                        <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['nome']); ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <div class="breadcrumb-display" id="categoria-breadcrumb">
+                    Selecione uma categoria abaixo...
+                </div>
+                <div id="categoria-hierarchy-container">
+                    <div class="categoria-level" id="nivel-0">
+                        <label>Nível 1:</label>
+                        <select class="categoria-select" data-nivel="0" required>
+                            <option value="">Selecione a categoria principal...</option>
+                            <?php foreach($categorias_raiz as $c): ?>
+                                <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['nome']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+                <!-- Campo hidden que guardará o ID da categoria final selecionada -->
+                <input type="hidden" name="categoria_final" id="categoria_final" required>
             </div>
 
             <h3>Componentes / Composição (opcional)</h3>
             <p>Adicione subprodutos que compõem este produto. Se houver componentes, por padrão o produto será tratado como kit (sem estoque próprio).</p>
 
-            <div id="lista-comps">
-                <!-- Linhas serão adicionadas por JS -->
-            </div>
+            <div id="lista-comps"></div>
 
             <button type="button" onclick="addComp()">+ Adicionar Componente</button>
 
@@ -344,7 +392,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             </div>
 
             <h3>Atributos</h3>
-            <div id="atributos-dinamicos"><p>Selecione uma categoria primeiro.</p></div>
+            <div id="atributos-dinamicos"><p>Selecione uma categoria para carregar os atributos.</p></div>
 
             <h3>Arquivos</h3>
             <div class="form-group">
@@ -374,7 +422,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         }
 
-        // Inicializar ao carregar a página
         document.addEventListener('DOMContentLoaded', function() {
             toggleLocadorField();
         });
@@ -396,14 +443,117 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     </script>
 
-    <script src="../../assets/js/scripts.js"></script>
+    <!-- SCRIPT PARA HIERARQUIA DE CATEGORIAS -->
     <script>
-        const catSel = document.querySelector('select[name="categoria_id"]');
-        if (catSel) {
-            catSel.addEventListener('change', function() {
-                if (this.value) carregarAtributos(this.value);
+        (function() {
+            const container = document.getElementById('categoria-hierarchy-container');
+            const hiddenInput = document.getElementById('categoria_final');
+            const breadcrumbDiv = document.getElementById('categoria-breadcrumb');
+            let nivelAtual = 0;
+            let categoriasPath = []; // Array de {id, nome} para breadcrumb
+
+            // Listener para os selects de categoria
+            container.addEventListener('change', function(e) {
+                if (e.target.classList.contains('categoria-select')) {
+                    const nivel = parseInt(e.target.dataset.nivel);
+                    const categoriaId = e.target.value;
+                    
+                    // Remove níveis posteriores
+                    removerNiveisPosteriores(nivel);
+                    
+                    if (categoriaId) {
+                        const categoriaTexto = e.target.options[e.target.selectedIndex].text;
+                        
+                        // Atualiza path
+                        categoriasPath = categoriasPath.slice(0, nivel);
+                        categoriasPath.push({id: categoriaId, nome: categoriaTexto});
+                        
+                        // Atualiza hidden input
+                        hiddenInput.value = categoriaId;
+                        
+                        // Atualiza breadcrumb
+                        atualizarBreadcrumb();
+                        
+                        // Busca subcategorias
+                        buscarSubcategorias(categoriaId, nivel + 1);
+                        
+                        // Carrega atributos da categoria final
+                        if (typeof carregarAtributos === 'function') {
+                            carregarAtributos(categoriaId);
+                        }
+                    } else {
+                        hiddenInput.value = '';
+                        categoriasPath = categoriasPath.slice(0, nivel);
+                        atualizarBreadcrumb();
+                        document.getElementById('atributos-dinamicos').innerHTML = '<p>Selecione uma categoria para carregar os atributos.</p>';
+                    }
+                }
             });
-        }
+
+            function removerNiveisPosteriores(nivel) {
+                const niveis = container.querySelectorAll('.categoria-level');
+                niveis.forEach((nivelDiv, idx) => {
+                    if (idx > nivel) {
+                        nivelDiv.remove();
+                    }
+                });
+                nivelAtual = nivel;
+            }
+
+            function buscarSubcategorias(categoriaId, proximoNivel) {
+                // Busca via AJAX subcategorias da categoria selecionada
+                fetch(`../../api/categorias_filhos.php?categoria_id=${categoriaId}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.sucesso && data.categorias && data.categorias.length > 0) {
+                            adicionarNivelCategoria(data.categorias, proximoNivel);
+                        }
+                    })
+                    .catch(err => console.error('Erro ao buscar subcategorias:', err));
+            }
+
+            function adicionarNivelCategoria(categorias, nivel) {
+                const nivelDiv = document.createElement('div');
+                nivelDiv.className = 'categoria-level';
+                nivelDiv.id = `nivel-${nivel}`;
+                
+                const label = document.createElement('label');
+                label.textContent = `Nível ${nivel + 1}:`;
+                
+                const select = document.createElement('select');
+                select.className = 'categoria-select';
+                select.dataset.nivel = nivel;
+                
+                const optionDefault = document.createElement('option');
+                optionDefault.value = '';
+                optionDefault.textContent = '(Opcional - selecione uma subcategoria)';
+                select.appendChild(optionDefault);
+                
+                categorias.forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat.id;
+                    option.textContent = cat.nome;
+                    select.appendChild(option);
+                });
+                
+                nivelDiv.appendChild(label);
+                nivelDiv.appendChild(select);
+                container.appendChild(nivelDiv);
+                
+                nivelAtual = nivel;
+            }
+
+            function atualizarBreadcrumb() {
+                if (categoriasPath.length === 0) {
+                    breadcrumbDiv.innerHTML = 'Selecione uma categoria abaixo...';
+                } else {
+                    const nomes = categoriasPath.map(c => c.nome);
+                    breadcrumbDiv.innerHTML = '<strong>Categoria selecionada:</strong> ' + nomes.join(' → ');
+                }
+            }
+        })();
     </script>
+
+    <script src="../../assets/js/scripts.js"></script>
 </body>
 </html>

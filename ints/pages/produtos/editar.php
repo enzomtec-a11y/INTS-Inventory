@@ -7,7 +7,7 @@ $produto_data = null;
 $atributos_valores_atuais = []; 
 $arquivos_existentes = []; 
 $componentes_atuais = []; 
-$categorias = []; 
+$categorias_raiz = []; 
 $produtos_lista = []; 
 $usuario_id_log = getUsuarioId();
 
@@ -22,10 +22,7 @@ if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
 // --- 1. FUNÇÃO AUXILIAR EAV ---
 function get_eav_params_update($valor, $tipo) {
     $coluna_valor = null; $bind_type = null; $valor_tratado = $valor;
-
-    // Normaliza tipos comuns
     if ($tipo === 'selecao' || $tipo === 'select') $tipo = 'opcao';
-
     if ($tipo !== 'booleano' && ($valor === '' || $valor === null || (is_array($valor) && empty($valor)))) {
         return ['coluna_valor' => null, 'bind_type' => null, 'valor_tratado' => null];
     }
@@ -53,7 +50,6 @@ function get_eav_params_update($valor, $tipo) {
     return ['coluna_valor' => $coluna_valor, 'bind_type' => $bind_type, 'valor_tratado' => $valor_tratado];
 }
 
-// Utilitários para mapear opção (atributos_opcoes) -> valor permitido (atributos_valores_permitidos)
 function obterOpcaoPorId($conn, $opcao_id) {
     $stmt = $conn->prepare("SELECT id, atributo_id, valor FROM atributos_opcoes WHERE id = ?");
     $stmt->bind_param("i", $opcao_id);
@@ -69,8 +65,6 @@ function mapOpcaoParaValorPermitido($conn, $opcao_id) {
     if (!$op) return null;
     $atributo_id = (int)$op['atributo_id'];
     $valor_texto = $op['valor'];
-
-    // Verifica se já existe em atributos_valores_permitidos
     $stmt = $conn->prepare("SELECT id FROM atributos_valores_permitidos WHERE atributo_id = ? AND valor_permitido = ?");
     $stmt->bind_param("is", $atributo_id, $valor_texto);
     $stmt->execute();
@@ -78,8 +72,6 @@ function mapOpcaoParaValorPermitido($conn, $opcao_id) {
     $row = $res->fetch_assoc();
     $stmt->close();
     if ($row) return (int)$row['id'];
-
-    // Insere novo
     $stmt = $conn->prepare("INSERT INTO atributos_valores_permitidos (atributo_id, valor_permitido) VALUES (?, ?)");
     $stmt->bind_param("is", $atributo_id, $valor_texto);
     $stmt->execute();
@@ -100,10 +92,10 @@ if (!$produto_id) {
 }
 
 // --- 2. CARREGAR DADOS PARA DROPDOWNS ---
-$res_cat = $conn->query("SELECT id, nome FROM categorias WHERE deletado = FALSE ORDER BY nome");
-while ($r = $res_cat->fetch_assoc()) $categorias[] = $r;
+$res_cat = $conn->query("SELECT id, nome FROM categorias WHERE deletado = FALSE AND categoria_pai_id IS NULL ORDER BY nome");
+while ($r = $res_cat->fetch_assoc()) $categorias_raiz[] = $r;
 
-// Lista de produtos para seleção de componente: se admin_unidade, limitar aos produtos da unidade
+// Lista de produtos
 if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
     $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
     $sql_prod = "
@@ -122,19 +114,20 @@ if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
 }
 while ($r = $res_prod->fetch_assoc()) $produtos_lista[] = $r;
 
-
 // --- 3. LÓGICA DE ATUALIZAÇÃO (POST) ---
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $nome = trim($_POST['nome_produto'] ?? '');
     $descricao = trim($_POST['descricao'] ?? '');
-    $categoria_id = (int)$_POST['categoria_id'];
     
-    // Kit
+    // NOVA LÓGICA: Categoria final do último select
+    $categoria_id = 0;
+    if (!empty($_POST['categoria_final'])) {
+        $categoria_id = (int)$_POST['categoria_final'];
+    }
+    
     $is_kit = isset($_POST['is_kit']);
-    // O hidden 'controla_estoque_proprio' envia 0 se for kit, 1 se não for
     $controla_estoque = isset($_POST['controla_estoque_proprio']) ? (int)$_POST['controla_estoque_proprio'] : 1;
     
-    // NOVOS CAMPOS
     $tipo_posse = $_POST['tipo_posse'] ?? 'proprio';
     $locador_nome = trim($_POST['locador_nome'] ?? '');
 
@@ -143,7 +136,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } elseif ($tipo_posse == 'locado' && empty($locador_nome)) {
         $status_message = "<p style='color:red'>Para produtos locados, o nome do locador é obrigatório.</p>";
     } else {
-        // Se usuário é admin_unidade, certifique-se de que ele tem permissão para editar este produto
         if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
             $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
             $sql_check = "SELECT 1 FROM estoques e WHERE e.produto_id = ? AND e.local_id IN ($idsStr) LIMIT 1";
@@ -153,7 +145,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $rc = $stc->get_result();
             $stc->close();
             if (!($rc && $rc->num_rows > 0)) {
-                // Também verifica patrimonios
                 $sql_check2 = "SELECT 1 FROM patrimonios pt WHERE pt.produto_id = ? AND pt.local_id IN ($idsStr) LIMIT 1";
                 $stc2 = $conn->prepare($sql_check2);
                 $stc2->bind_param("i", $produto_id);
@@ -169,22 +160,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if (empty($status_message)) {
             $conn->begin_transaction();
             try {
-                // 1. UPDATE Produto
                 $sql_up = "UPDATE produtos SET nome=?, descricao=?, categoria_id=?, controla_estoque_proprio=?, tipo_posse=?, locador_nome=?, data_atualizado=NOW() WHERE id=?";
                 $stmt = $conn->prepare($sql_up);
                 $stmt->bind_param("ssiissi", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_nome, $produto_id);
                 $stmt->execute();
                 $stmt->close();
 
-                // 2. UPDATE Componentes (Kit)
                 $conn->query("DELETE FROM produto_relacionamento WHERE produto_principal_id = $produto_id AND tipo_relacao = 'kit'");
                 
-                // Só insere componentes se for kit e houver dados
                 if ($is_kit && !empty($_POST['componente_id'])) {
                     $stmt_k = $conn->prepare("INSERT INTO produto_relacionamento (produto_principal_id, subproduto_id, quantidade, tipo_relacao) VALUES (?, ?, ?, 'kit')");
                     foreach ($_POST['componente_id'] as $idx => $sub_id) {
                         $qtd = (float)($_POST['componente_qtd'][$idx] ?? 1);
-                        // Valida se o subproduto existe e quantidade > 0
                         if ($sub_id > 0 && $qtd > 0) {
                             $stmt_k->bind_param("iid", $produto_id, $sub_id, $qtd);
                             $stmt_k->execute();
@@ -193,18 +180,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $stmt_k->close();
                 }
 
-                // 3. UPDATE Atributos
                 $conn->query("DELETE FROM atributos_valor WHERE produto_id = $produto_id");
                 
-                // Preferir array atributo_valor[...] (padrão atual). Se não existir, tentar o padrão antigo 'attr_'
                 if (!empty($_POST['atributo_valor']) && is_array($_POST['atributo_valor'])) {
                     foreach ($_POST['atributo_valor'] as $aid => $val) {
                         $attr_id = (int)$aid;
                         $tipo = strtolower($_POST["tipo_attr_" . $attr_id] ?? 'texto');
-
                         $val_salvar = is_array($val) ? implode(',', $val) : $val;
 
-                        // Só tente mapear para opção se o atributo for do tipo seleção
                         if (in_array($tipo, ['selecao','select','opcao','multi_opcao'])) {
                             if (is_numeric($val_salvar) && (int)$val_salvar > 0) {
                                 $op = obterOpcaoPorId($conn, (int)$val_salvar);
@@ -226,7 +209,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     }
                                 }
                             } else {
-                                // salva como texto (select com texto livre)
                                 $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
                                 $stmt_a->bind_param("iis", $produto_id, $attr_id, $val_salvar);
                                 $stmt_a->execute();
@@ -235,7 +217,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             }
                         }
 
-                        // Caso normal
                         $params = get_eav_params_update($val_salvar, $tipo);
                         if ($params['coluna_valor']) {
                             $sql_ins = "INSERT INTO atributos_valor (produto_id, atributo_id, {$params['coluna_valor']}) VALUES (?, ?, ?)";
@@ -246,59 +227,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             $stmt_a->close();
                         }
                     }
-                } else {
-                    // Padrão antigo: campos com prefixo attr_{id}
-                    foreach ($_POST as $key => $valor) {
-                        if (strpos($key, 'attr_') === 0) {
-                            $attr_id = (int)str_replace('attr_', '', $key);
-                            $tipo = $_POST["tipo_attr_" . $attr_id] ?? '';
-                            if (empty($tipo)) continue;
-
-                            $val_salvar = is_array($valor) ? implode(',', $valor) : $valor;
-
-                            if (in_array(strtolower($tipo), ['selecao','select','opcao','multi_opcao'])) {
-                                if (is_numeric($val_salvar) && (int)$val_salvar > 0) {
-                                    $op = obterOpcaoPorId($conn, (int)$val_salvar);
-                                    if ($op) {
-                                        $vp_id = mapOpcaoParaValorPermitido($conn, (int)$val_salvar);
-                                        $texto = $op['valor'];
-                                        if ($vp_id) {
-                                            $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto, valor_permitido_id) VALUES (?, ?, ?, ?)");
-                                            $stmt_a->bind_param("iisi", $produto_id, $attr_id, $texto, $vp_id);
-                                            $stmt_a->execute();
-                                            $stmt_a->close();
-                                            continue;
-                                        } else {
-                                            $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
-                                            $stmt_a->bind_param("iis", $produto_id, $attr_id, $texto);
-                                            $stmt_a->execute();
-                                            $stmt_a->close();
-                                            continue;
-                                        }
-                                    }
-                                } else {
-                                    $stmt_a = $conn->prepare("INSERT INTO atributos_valor (produto_id, atributo_id, valor_texto) VALUES (?, ?, ?)");
-                                    $stmt_a->bind_param("iis", $produto_id, $attr_id, $val_salvar);
-                                    $stmt_a->execute();
-                                    $stmt_a->close();
-                                    continue;
-                                }
-                            }
-
-                            $params = get_eav_params_update($val_salvar, $tipo);
-                            if ($params['coluna_valor']) {
-                                $sql_ins = "INSERT INTO atributos_valor (produto_id, atributo_id, {$params['coluna_valor']}) VALUES (?, ?, ?)";
-                                $stmt_a = $conn->prepare($sql_ins);
-                                $bind = "ii" . $params['bind_type'];
-                                $stmt_a->bind_param($bind, $produto_id, $attr_id, $params['valor_tratado']);
-                                $stmt_a->execute();
-                                $stmt_a->close();
-                            }
-                        }
-                    }
                 }
 
-                // 4. Arquivos
                 if (function_exists('processarUploadArquivo')) {
                     if (!empty($_FILES['arq_imagem']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_imagem'], 'imagem');
                     if (!empty($_FILES['arq_nota']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_nota'], 'nota_fiscal');
@@ -328,7 +258,6 @@ $stmt->close();
 
 if (!$produto_data) die("Produto não encontrado.");
 
-// Se admin_unidade, valida se produto pertence à unidade antes de permitir edição
 if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
     $idsStr = implode(',', array_map('intval', $unidade_locais_ids));
     $sql_check = "SELECT 1 FROM estoques e WHERE e.produto_id = ? AND e.local_id IN ($idsStr) LIMIT 1";
@@ -355,10 +284,9 @@ $sql_k = "SELECT subproduto_id, quantidade FROM produto_relacionamento WHERE pro
 $res_k = $conn->query($sql_k);
 while($r = $res_k->fetch_assoc()) $componentes_atuais[] = $r;
 
-// Define se é kit: Se tem componentes OU se a flag de controle de estoque está desligada
 $is_kit_atual = (count($componentes_atuais) > 0) || ($produto_data['controla_estoque_proprio'] == 0);
 
-// Carregar Atributos (AGORA TAMBÉM BUSCANDO valor_permitido_id)
+// Carregar Atributos
 $sql_av = "
     SELECT av.atributo_id, av.valor_permitido_id,
     COALESCE(av.valor_texto, CAST(av.valor_numero AS CHAR), CAST(av.valor_booleano AS CHAR), av.valor_data) as val 
@@ -366,7 +294,6 @@ $sql_av = "
 ";
 $res_av = $conn->query($sql_av);
 while($r = $res_av->fetch_assoc()) {
-    // Preferir valor_permitido_id (para selects), senão usar o texto
     if (!empty($r['valor_permitido_id'])) $atributos_valores_atuais[$r['atributo_id']] = $r['valor_permitido_id'];
     else $atributos_valores_atuais[$r['atributo_id']] = $r['val'];
 }
@@ -378,6 +305,34 @@ $produtos_lista_json = json_encode($produtos_lista);
 $res_arq = $conn->query("SELECT id, tipo, caminho FROM arquivos WHERE produto_id = $produto_id");
 while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
 
+// BUSCAR CAMINHO DA CATEGORIA (HIERARQUIA COMPLETA)
+function getCaminhoCategoria($conn, $categoria_id) {
+    $caminho = [];
+    $atual = $categoria_id;
+    $profundidade = 0;
+    $max_profundidade = 20;
+    
+    while ($atual && $profundidade < $max_profundidade) {
+        $stmt = $conn->prepare("SELECT id, nome, categoria_pai_id FROM categorias WHERE id = ? LIMIT 1");
+        $stmt->bind_param("i", $atual);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        
+        if ($row) {
+            array_unshift($caminho, ['id' => $row['id'], 'nome' => $row['nome']]);
+            $atual = $row['categoria_pai_id'];
+        } else {
+            break;
+        }
+        $profundidade++;
+    }
+    
+    return $caminho;
+}
+
+$caminho_categoria = getCaminhoCategoria($conn, $produto_data['categoria_id']);
+$caminho_categoria_json = json_encode($caminho_categoria);
 ?>
 
 <!DOCTYPE html>
@@ -397,6 +352,45 @@ while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
         .btn-rmv { background: #e74c3c; color: white; border: none; padding: 5px 10px; cursor: pointer; }
         .file-list img { max-height: 50px; vertical-align: middle; margin-right: 10px; }
         .file-list { margin-bottom: 10px; }
+        
+        /* Estilos para hierarquia de categorias */
+        #categoria-hierarchy-container { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px; 
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .categoria-level { 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+        }
+        .categoria-level label {
+            min-width: 100px;
+            margin: 0;
+        }
+        .categoria-level select {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .breadcrumb-display {
+            font-size: 0.9em;
+            color: #666;
+            padding: 8px;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            min-height: 20px;
+        }
+        .breadcrumb-display strong {
+            color: #333;
+        }
     </style>
 </head>
 <body>
@@ -412,6 +406,7 @@ while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
                 <label>Nome <span class="required-star">*</span></label>
                 <input type="text" name="nome_produto" value="<?php echo htmlspecialchars($produto_data['nome']); ?>" required>
             </div>
+            
             <div class="form-group">
                 <label>Descrição</label>
                 <textarea name="descricao"><?php echo htmlspecialchars($produto_data['descricao']); ?></textarea>
@@ -459,15 +454,16 @@ while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
                 <button type="button" onclick="addComp()" style="margin-top:10px;">+ Componente</button>
             </div>
 
+            <!-- NOVA SEÇÃO DE CATEGORIA HIERÁRQUICA -->
             <div class="form-group">
                 <label>Categoria <span class="required-star">*</span></label>
-                <select name="categoria_id" id="categoria_id" required data-valores-atuais='<?php echo $valores_json; ?>'>
-                    <?php foreach($categorias as $c): ?>
-                        <option value="<?php echo $c['id']; ?>" <?php echo $c['id'] == $produto_data['categoria_id'] ? 'selected' : ''; ?>>
-                            <?php echo htmlspecialchars($c['nome']); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
+                <div class="breadcrumb-display" id="categoria-breadcrumb">
+                    Carregando categoria atual...
+                </div>
+                <div id="categoria-hierarchy-container">
+                    <!-- Será preenchido dinamicamente pelo JavaScript -->
+                </div>
+                <input type="hidden" name="categoria_final" id="categoria_final" required>
             </div>
 
             <div id="atributos-dinamicos"><p>Carregando atributos...</p></div>
@@ -482,15 +478,16 @@ while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
                     </div>
                 <?php endif; ?>
                 <input type="file" name="arq_imagem">
-                </div>
+            </div>
 
             <button type="submit" style="margin-top:20px; padding:10px 20px; background:#f39c12; color:white; border:none; cursor:pointer;">Salvar Alterações</button>
         </form>
     </div>
 
-    <script src="../../assets/js/scripts.js"></script>
     <script>
         const prods = <?php echo $produtos_lista_json; ?>;
+        const caminhoCategoria = <?php echo $caminho_categoria_json; ?>;
+        
         const ckKit = document.getElementById('is_kit');
         const areaKit = document.getElementById('area-kit');
         const lsComp = document.getElementById('lista-comps');
@@ -511,16 +508,13 @@ while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
             }
         }
 
-        // Inicializar campo locador
         toggleLocadorField();
 
-        // Toggle Kit (COM CORREÇÃO DE DISABLE)
         function toggleKit() {
             const isChecked = ckKit.checked;
             areaKit.style.display = isChecked ? 'block' : 'none';
             hiddenEstoque.value = isChecked ? '0' : '1';
             
-            // DESABILITA os campos do Kit quando escondidos para não bloquear o submit
             const inputsKit = areaKit.querySelectorAll('input, select');
             inputsKit.forEach(el => {
                 el.disabled = !isChecked;
@@ -529,8 +523,6 @@ while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
             if(isChecked && lsComp.innerHTML.trim() == '') addComp();
         }
         ckKit.addEventListener('change', toggleKit);
-        
-        // Executa ao carregar
         toggleKit(); 
 
         function addComp() {
@@ -543,11 +535,184 @@ while($r = $res_arq->fetch_assoc()) $arquivos_existentes[$r['tipo']][] = $r;
                              <button type="button" class="btn-rmv" onclick="this.parentElement.remove()">X</button>`;
             lsComp.appendChild(div);
         }
+    </script>
 
-        // Init Atributos (Scripts.js)
-        const catSel = document.getElementById('categoria_id');
-        if(catSel && catSel.value) carregarAtributos(catSel.value);
-        catSel.addEventListener('change', function(){ if(this.value) carregarAtributos(this.value); });
+    <!-- SCRIPT PARA HIERARQUIA DE CATEGORIAS NA EDIÇÃO -->
+    <script>
+        (function() {
+            const container = document.getElementById('categoria-hierarchy-container');
+            const hiddenInput = document.getElementById('categoria_final');
+            const breadcrumbDiv = document.getElementById('categoria-breadcrumb');
+            let nivelAtual = 0;
+            let categoriasPath = [];
+
+            // Inicializar com o caminho da categoria atual
+            inicializarCategoriaAtual();
+
+            container.addEventListener('change', function(e) {
+                if (e.target.classList.contains('categoria-select')) {
+                    const nivel = parseInt(e.target.dataset.nivel);
+                    const categoriaId = e.target.value;
+                    
+                    removerNiveisPosteriores(nivel);
+                    
+                    if (categoriaId) {
+                        const categoriaTexto = e.target.options[e.target.selectedIndex].text;
+                        categoriasPath = categoriasPath.slice(0, nivel);
+                        categoriasPath.push({id: categoriaId, nome: categoriaTexto});
+                        hiddenInput.value = categoriaId;
+                        atualizarBreadcrumb();
+                        buscarSubcategorias(categoriaId, nivel + 1);
+                        
+                        if (typeof carregarAtributos === 'function') {
+                            carregarAtributos(categoriaId);
+                        }
+                    } else {
+                        hiddenInput.value = '';
+                        categoriasPath = categoriasPath.slice(0, nivel);
+                        atualizarBreadcrumb();
+                    }
+                }
+            });
+
+            function inicializarCategoriaAtual() {
+                if (caminhoCategoria && caminhoCategoria.length > 0) {
+                    categoriasPath = caminhoCategoria;
+                    hiddenInput.value = caminhoCategoria[caminhoCategoria.length - 1].id;
+                    atualizarBreadcrumb();
+                    
+                    // Construir os selects para cada nível
+                    construirNiveisIniciais();
+                }
+            }
+
+            async function construirNiveisIniciais() {
+                // Buscar categorias raiz
+                const categorias_raiz = <?php echo json_encode($categorias_raiz); ?>;
+                
+                // Criar primeiro nível
+                const primeiroNivelDiv = document.createElement('div');
+                primeiroNivelDiv.className = 'categoria-level';
+                primeiroNivelDiv.id = 'nivel-0';
+                
+                const label = document.createElement('label');
+                label.textContent = 'Nível 1:';
+                
+                const select = document.createElement('select');
+                select.className = 'categoria-select';
+                select.dataset.nivel = '0';
+                select.required = true;
+                
+                const optionDefault = document.createElement('option');
+                optionDefault.value = '';
+                optionDefault.textContent = 'Selecione a categoria principal...';
+                select.appendChild(optionDefault);
+                
+                categorias_raiz.forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat.id;
+                    option.textContent = cat.nome;
+                    if (categoriasPath[0] && categoriasPath[0].id == cat.id) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+                
+                primeiroNivelDiv.appendChild(label);
+                primeiroNivelDiv.appendChild(select);
+                container.appendChild(primeiroNivelDiv);
+                
+                // Construir níveis subsequentes
+                for (let i = 0; i < categoriasPath.length - 1; i++) {
+                    const catAtual = categoriasPath[i];
+                    const catProxima = categoriasPath[i + 1];
+                    
+                    try {
+                        const response = await fetch(`../../api/categorias_filhos.php?categoria_id=${catAtual.id}`);
+                        const data = await response.json();
+                        
+                        if (data.sucesso && data.categorias && data.categorias.length > 0) {
+                            adicionarNivelCategoria(data.categorias, i + 1, catProxima.id);
+                        }
+                    } catch (err) {
+                        console.error('Erro ao buscar subcategorias:', err);
+                    }
+                }
+            }
+
+            function removerNiveisPosteriores(nivel) {
+                const niveis = container.querySelectorAll('.categoria-level');
+                niveis.forEach((nivelDiv, idx) => {
+                    if (idx > nivel) {
+                        nivelDiv.remove();
+                    }
+                });
+                nivelAtual = nivel;
+            }
+
+            function buscarSubcategorias(categoriaId, proximoNivel) {
+                fetch(`../../api/categorias_filhos.php?categoria_id=${categoriaId}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.sucesso && data.categorias && data.categorias.length > 0) {
+                            adicionarNivelCategoria(data.categorias, proximoNivel);
+                        }
+                    })
+                    .catch(err => console.error('Erro ao buscar subcategorias:', err));
+            }
+
+            function adicionarNivelCategoria(categorias, nivel, selectedId = null) {
+                const nivelDiv = document.createElement('div');
+                nivelDiv.className = 'categoria-level';
+                nivelDiv.id = `nivel-${nivel}`;
+                
+                const label = document.createElement('label');
+                label.textContent = `Nível ${nivel + 1}:`;
+                
+                const select = document.createElement('select');
+                select.className = 'categoria-select';
+                select.dataset.nivel = nivel;
+                
+                const optionDefault = document.createElement('option');
+                optionDefault.value = '';
+                optionDefault.textContent = '(Opcional - selecione uma subcategoria)';
+                select.appendChild(optionDefault);
+                
+                categorias.forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat.id;
+                    option.textContent = cat.nome;
+                    if (selectedId && cat.id == selectedId) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+                
+                nivelDiv.appendChild(label);
+                nivelDiv.appendChild(select);
+                container.appendChild(nivelDiv);
+                
+                nivelAtual = nivel;
+            }
+
+            function atualizarBreadcrumb() {
+                if (categoriasPath.length === 0) {
+                    breadcrumbDiv.innerHTML = 'Selecione uma categoria abaixo...';
+                } else {
+                    const nomes = categoriasPath.map(c => c.nome);
+                    breadcrumbDiv.innerHTML = '<strong>Categoria selecionada:</strong> ' + nomes.join(' → ');
+                }
+            }
+        })();
+    </script>
+
+    <script src="../../assets/js/scripts.js"></script>
+    <script>
+        // Carregar atributos da categoria atual ao iniciar
+        const categoriaId = <?php echo $produto_data['categoria_id']; ?>;
+        if (categoriaId && typeof carregarAtributos === 'function') {
+            carregarAtributos(categoriaId);
+        }
     </script>
 </body>
 </html>
