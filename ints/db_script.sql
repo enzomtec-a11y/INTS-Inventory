@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`categorias` (
     FOREIGN KEY (`categoria_pai_id`)
     REFERENCES `ints_db`.`categorias` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 10
+AUTO_INCREMENT = 11
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -62,9 +62,11 @@ DEFAULT CHARACTER SET = latin1;
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `numero_patrimonio` VARCHAR(100) NULL DEFAULT NULL,
   `nome` VARCHAR(100) NOT NULL,
   `descricao` TEXT NULL DEFAULT NULL,
   `categoria_id` INT(11) NOT NULL,
+  `local_id_inicial` INT(11) NULL DEFAULT NULL,
   `controla_estoque_proprio` TINYINT(1) NULL DEFAULT 1,
   `tipo_posse` ENUM('proprio', 'locado') NOT NULL DEFAULT 'proprio',
   `locador_nome` VARCHAR(255) NULL DEFAULT NULL,
@@ -72,12 +74,15 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   `data_atualizado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
   `deletado` TINYINT(1) NULL DEFAULT 0,
   PRIMARY KEY (`id`),
+  UNIQUE INDEX `numero_patrimonio` (`numero_patrimonio` ASC) VISIBLE,
   INDEX `idx_produtos_categoria` (`categoria_id` ASC) VISIBLE,
+  INDEX `idx_numero_patrimonio` (`numero_patrimonio` ASC) VISIBLE,
+  INDEX `idx_local_inicial` (`local_id_inicial` ASC) VISIBLE,
   CONSTRAINT `produtos_ibfk_1`
     FOREIGN KEY (`categoria_id`)
     REFERENCES `ints_db`.`categorias` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 4
+AUTO_INCREMENT = 18
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -103,7 +108,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`acoes_log` (
     FOREIGN KEY (`produto_id`)
     REFERENCES `ints_db`.`produtos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 10
+AUTO_INCREMENT = 50
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -190,7 +195,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_valores_permitidos` (
     FOREIGN KEY (`atributo_id`)
     REFERENCES `ints_db`.`atributos_definicao` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 3
+AUTO_INCREMENT = 4
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -222,7 +227,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_valor` (
     FOREIGN KEY (`valor_permitido_id`)
     REFERENCES `ints_db`.`atributos_valores_permitidos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 25
+AUTO_INCREMENT = 98
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -267,7 +272,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo` (
     FOREIGN KEY (`atributo_id`)
     REFERENCES `ints_db`.`atributos_definicao` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 12
+AUTO_INCREMENT = 14
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -288,7 +293,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo_opcao` (
     FOREIGN KEY (`atributo_opcao_id`)
     REFERENCES `ints_db`.`atributos_opcoes` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 4
+AUTO_INCREMENT = 7
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -308,7 +313,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`locais` (
     FOREIGN KEY (`local_pai_id`)
     REFERENCES `ints_db`.`locais` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 6
+AUTO_INCREMENT = 8
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -333,7 +338,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`estoques` (
     FOREIGN KEY (`local_id`)
     REFERENCES `ints_db`.`locais` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 5
+AUTO_INCREMENT = 17
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -378,7 +383,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`movimentacoes` (
     FOREIGN KEY (`usuario_id`)
     REFERENCES `ints_db`.`usuarios` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 3
+AUTO_INCREMENT = 7
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -456,6 +461,33 @@ USE `ints_db` ;
 CREATE TABLE IF NOT EXISTS `ints_db`.`vw_patrimonio_detalhado` (`patrimonio_id` INT, `produto_nome` INT, `categoria` INT, `numero_patrimonio` INT, `status` INT, `local_nome` INT, `marca` INT, `modelo` INT, `voltagem` INT);
 
 -- -----------------------------------------------------
+-- function gerar_numero_patrimonio
+-- -----------------------------------------------------
+
+DELIMITER $$
+USE `ints_db`$$
+CREATE DEFINER=`root`@`localhost` FUNCTION `gerar_numero_patrimonio`(p_unidade_id INT,
+    p_categoria_id INT,
+    p_produto_id INT
+) RETURNS varchar(100) CHARSET utf8mb4 COLLATE utf8mb4_general_ci
+    DETERMINISTIC
+BEGIN
+    DECLARE num_patrimonio VARCHAR(100);
+    
+    -- Formato: UNIDADE-CATEGORIA-PRODUTO
+    -- Pads com zeros à esquerda para manter tamanho consistente
+    SET num_patrimonio = CONCAT(
+        LPAD(IFNULL(p_unidade_id, 0), 3, '0'), '-',
+        LPAD(p_categoria_id, 3, '0'), '-',
+        LPAD(p_produto_id, 6, '0')
+    );
+    
+    RETURN num_patrimonio;
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
 -- procedure sp_registrar_movimentacao
 -- -----------------------------------------------------
 
@@ -522,6 +554,19 @@ BEGIN
     IF ciclo_detectado = 1 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ciclo detectado na hierarquia de categorias';
     END IF;
+END$$
+
+USE `ints_db`$$
+CREATE
+DEFINER=`root`@`localhost`
+TRIGGER `ints_db`.`before_produto_insert_patrimonio`
+BEFORE INSERT ON `ints_db`.`produtos`
+FOR EACH ROW
+BEGIN
+    -- Gera o número de patrimônio baseado no próximo ID (AUTO_INCREMENT)
+    -- Nota: NEW.id ainda não está disponível no BEFORE INSERT,
+    -- então usaremos AFTER INSERT para atualizar
+    SET NEW.numero_patrimonio = NULL;
 END$$
 
 
