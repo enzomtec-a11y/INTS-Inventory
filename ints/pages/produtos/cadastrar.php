@@ -160,6 +160,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         } else {
             $conn->begin_transaction();
             try {
+                // Insere o produto SEM número de patrimônio
                 $sql = "INSERT INTO produtos (nome, descricao, categoria_id, controla_estoque_proprio, tipo_posse, locador_nome, data_criado) VALUES (?, ?, ?, ?, ?, ?, NOW())";
                 $stmt = $conn->prepare($sql);
                 $stmt->bind_param("ssiiss", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_nome);
@@ -167,7 +168,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $produto_id = $stmt->insert_id;
                 $stmt->close();
 
-                if (function_exists('registrarLog')) registrarLog($conn, $usuario_id_log, 'produtos', $produto_id, 'CRIACAO', "Produto criado via formulário (composição inline).", $produto_id);
+                // GERA O NÚMERO DE PATRIMÔNIO usando a function do banco
+                // A function espera: gerar_numero_patrimonio(unidade_id, categoria_id, produto_id)
+                // Se o usuário não tem unidade definida, usa 0
+                $unidade_para_patrimonio = ($usuario_unidade > 0) ? $usuario_unidade : 0;
+                
+                $stmt_patrimonio = $conn->prepare("SELECT gerar_numero_patrimonio(?, ?, ?) AS numero");
+                $stmt_patrimonio->bind_param("iii", $unidade_para_patrimonio, $categoria_id, $produto_id);
+                $stmt_patrimonio->execute();
+                $result_patrimonio = $stmt_patrimonio->get_result();
+                $row_patrimonio = $result_patrimonio->fetch_assoc();
+                $numero_patrimonio = $row_patrimonio['numero'];
+                $stmt_patrimonio->close();
+
+                // Atualiza o produto com o número de patrimônio gerado
+                $stmt_update = $conn->prepare("UPDATE produtos SET numero_patrimonio = ? WHERE id = ?");
+                $stmt_update->bind_param("si", $numero_patrimonio, $produto_id);
+                $stmt_update->execute();
+                $stmt_update->close();
+
+                if (function_exists('registrarLog')) registrarLog($conn, $usuario_id_log, 'produtos', $produto_id, 'CRIACAO', "Produto criado via formulário. Número de patrimônio: {$numero_patrimonio}", $produto_id);
 
                 // Se controla estoque e foi indicado local, cria estoque com quantidade = 1 (nova regra)
                 if ($controla_estoque && $local_id) {
@@ -244,10 +264,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     if (!empty($_FILES['arq_imagem']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_imagem'], 'imagem');
                     if (!empty($_FILES['arq_nota']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_nota'], 'nota_fiscal');
                     if (!empty($_FILES['arq_manual']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_manual'], 'manual');
+                    if (!empty($_FILES['arq_outro']['name'])) processarUploadArquivo($conn, $produto_id, $_FILES['arq_outro'], 'outro');
                 }
 
                 $conn->commit();
-                header("Location: listar.php?sucesso=cadastro");
+                // Redireciona com o número de patrimônio na URL para exibir no sucesso
+                header("Location: listar.php?sucesso=cadastro&patrimonio=" . urlencode($numero_patrimonio));
                 exit;
 
             } catch (Exception $e) {
@@ -394,8 +416,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             <h3>Arquivos</h3>
             <div class="form-group">
-                <label>Imagem</label>
-                <input type="file" name="arq_imagem">
+                <label>Imagem do Produto</label>
+                <input type="file" name="arq_imagem" accept="image/*">
+                <small style="color: #666; font-size: 0.85em;">Formatos aceitos: JPG, PNG, GIF, etc.</small>
+            </div>
+
+            <div class="form-group">
+                <label>Nota Fiscal</label>
+                <input type="file" name="arq_nota" accept=".pdf,.jpg,.jpeg,.png">
+                <small style="color: #666; font-size: 0.85em;">Formatos aceitos: PDF, JPG, PNG</small>
+            </div>
+
+            <div class="form-group">
+                <label>Manual do Produto</label>
+                <input type="file" name="arq_manual" accept=".pdf,.doc,.docx">
+                <small style="color: #666; font-size: 0.85em;">Formatos aceitos: PDF, DOC, DOCX</small>
+            </div>
+
+            <div class="form-group">
+                <label>Outros Documentos</label>
+                <input type="file" name="arq_outro" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
+                <small style="color: #666; font-size: 0.85em;">Formatos aceitos: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG</small>
             </div>
 
             <button type="submit" style="margin-top:12px; padding:10px 18px; background:#28a745; color:white; border:none; border-radius:4px;">Cadastrar Produto</button>
