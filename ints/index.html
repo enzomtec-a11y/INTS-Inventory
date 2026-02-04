@@ -38,81 +38,37 @@
 
         <h2>Menu Inicial</h2>
         <div class="menu-grid">
-            <a href="pages/produtos/cadastrar.php" class="menu-card">
-                <h2>Cadastrar Produto</h2>
-                <p>Adicione novos produtos ao inventário com atributos personalizados e estoque inicial</p>
+            <a href="pages/produtos/index.php" class="menu-card">
+                <h2>Gerenciar Produtos</h2>
+                <p>Adicione, edite, exclua e veja produtos cadastrados</p>
             </a>
-            
-            <a href="pages/produtos/listar.php" class="menu-card">
-                <h2>Ver Produtos</h2>
-                <p>Visualize, filtre, edite e gerencie todos os produtos cadastrados no sistema</p>
-            </a>
-            
-            <a href="pages/movimentacoes/solicitar.php" class="menu-card">
+
+            <a href="pages/movimentacoes/index.php" class="menu-card">
                 <h2>Movimentar Estoque</h2>
                 <p>Realize transferências de produtos entre diferentes locais de armazenamento</p>
-            </a>
-            
-            <a href="pages/movimentacoes/relatorio.php" class="menu-card">
-                <h2>Relatório de Movimentações</h2>
-                <p>Consulte o histórico completo de todas as movimentações realizadas</p>
             </a>
         </div>
         
         <div class="admin-section">
             <h2>Administação</h2>
             <div class="menu-grid">
-                <a href="pages/admin/admin_categorias.php" class="menu-card">
-                    <h2>Gerenciar Categorias</h2>
-                    <p>Crie e organize categorias hierárquicas para classificar seus produtos</p>
+                <a href="pages/admin/index.php" class="menu-card">
+                    <h2>Administação</h2>
+                    <p>Acesse todas as configurações do sistema (apenas Admin)</p>
                 </a>
-                
-                <a href="pages/admin/admin_atributos.php" class="menu-card">
-                    <h2>Definir Atributos</h2>
-                    <p>Configure atributos personalizados (texto, número, data, booleano)</p>
-                </a>
-                
-                <a href="pages/admin/admin_categoria_atributo.php" class="menu-card">
-                    <h2>Vincular Atributos</h2>
-                    <p>Associe atributos às categorias e defina quais são obrigatórios</p>
-                </a>
-                
-                <a href="pages/admin/admin_regras_condicionais.php" class="menu-card">
-                    <h2>Regras Condicionais</h2>
-                    <p>Configure regras dinâmicas entre atributos (bloquear/tornar obrigatório)</p>
-                </a>
-                
-                <a href="pages/admin/admin_locais.php" class="menu-card">
-                    <h2>Gerenciar Locais</h2>
-                    <p>Cadastre e administre os locais de armazenamento do inventário</p>
-                </a>
+            </div>
+        </div>
 
-                <a href="pages/admin/admin_atributo_opcoes.php" class="menu-card">
-                    <h2>Opções de Atributos</h2>
-                    <p>Gerencie permissões de valores para atributos</p>
-                </a>
-
-                <a href="pages/admin/admin_categoria_opcoes.php" class="menu-card">
-                    <h2>Opções de Categorias</h2>
-                    <p>Defina regras de valores de atributo para categorias</p>
-                </a>
-
-                <a href="pages/admin/admin_produto_relacionamento.php" class="menu-card">
-                    <h2>Kits de Produtos</h2>
-                    <p>Crie e gerencie kits de produtos</p>
-                </a>
-
-                <a href="pages/admin/admin_cadastro_usuario.php" class="menu-card" style="background:#6c5ce7;">
-                    <h2>Gerenciar Usuários</h2>
-                    <p>Cadastrar, editar e vincular administradores de unidade</p>
-                </a>
-
+        <div class="admin-section">
+            <h2>Usuários</h2>
+            <div class="menu-grid">
                 <a href="logout.php" class="menu-card" style="background:#6c5ce7;">
                     <h2>Login/Logout</h2>
                     <p>Conectar-se ou desconectar-se (caso já estiver conectado) a uma conta</p>
                 </a>
-            </div>
+            </div>   
         </div>
+
     </div>
 </body>
 </html>

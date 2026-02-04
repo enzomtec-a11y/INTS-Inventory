@@ -235,8 +235,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['acao']) && $_POST['ac
 
             <button type="submit">Enviar Solicitação</button>
         </form>
-
-        <p style="text-align:center; margin-top:12px;"><a href="listar.php">Voltar</a></p>
     </div>
 
 <script>

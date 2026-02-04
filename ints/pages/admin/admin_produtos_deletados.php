@@ -83,8 +83,7 @@ $conn->close();
 <body>
     <div class="container">
         <h1>Produtos excluidos</h1>
-        <p><a href="../produtos/listar.php">← Voltar para Inventário Ativo</a></p>
-
+        
         <?php 
         if (isset($_GET['sucesso'])) {
             echo "<p class='success'>" . htmlspecialchars($_GET['sucesso']) . "</p>";

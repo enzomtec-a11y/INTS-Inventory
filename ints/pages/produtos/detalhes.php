@@ -178,11 +178,6 @@ $conn->close();
             <h1><?php echo htmlspecialchars($produto['nome']); ?></h1>
             <span style="color: #777;">ID: <?php echo $produto['id']; ?></span>
         </div>
-        <div class="actions">
-            <a href="listar.php" class="btn-back">Voltar</a>
-            <a href="editar.php?id=<?php echo $produto['id']; ?>" class="btn-edit">Editar</a>
-            <a href="deletar.php?id=<?php echo $produto['id']; ?>" class="btn-del" onclick="return confirm('Confirmar exclusão?');">Excluir</a>
-        </div>
     </div>
 
     <div class="section">

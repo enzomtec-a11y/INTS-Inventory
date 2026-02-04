@@ -103,12 +103,7 @@ $conn->close();
 </head>
 <body>
     <div class="container">
-        <h1>Vincular Opções Permitidas à Categoria</h1>
-        <p>
-            <a href="../../index.html">Voltar para Home</a> | 
-            <a href="admin_atributo_opcoes.php">Gerenciar Opções Mestre</a>
-        </p>
-        
+        <h1>Vincular Opções Permitidas à Categoria</h1>    
         <?php echo $status_message; ?>
 
         <form method="POST" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>">

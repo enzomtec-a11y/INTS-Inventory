@@ -96,11 +96,6 @@ $conn->close();
 <body>
     <div class="container">
         <h1>Administração - Opções Mestre de Atributos</h1>
-        <p>
-            <a href="../../index.html">Voltar para Home</a> | 
-            <a href="admin_atributos.php">Gerenciar Atributos</a>
-        </p>
-        
         <?php echo $status_message; ?>
 
         <h2>Cadastrar Nova Opção Mestre</h2>

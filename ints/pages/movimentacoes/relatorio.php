@@ -57,7 +57,6 @@ if ($res) while ($r = $res->fetch_assoc()) $movimentacoes[] = $r;
 </head>
 <body>
     <h1>Relatório de Movimentações <?php echo $filtro_unidade ? '(Unidade)' : ''; ?></h1>
-    <a href="../../index.html">Voltar</a>
     <table>
         <thead>
             <tr>

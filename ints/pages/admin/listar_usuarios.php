@@ -98,10 +98,6 @@ $res = $conn->query($sql);
             <?php endwhile; ?>
         </tbody>
     </table>
-    
-    <div style="margin-top: 20px;">
-        <a href="../../index.html">← Voltar ao Início</a>
-    </div>
 </div>
 
 </body>

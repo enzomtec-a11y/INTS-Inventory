@@ -345,7 +345,6 @@ $res = $conn->query($sql_lista);
     <div class="tabs">
         <a href="?aba=pendentes" class="<?php echo $aba=='pendentes'?'active':'';?>">Pendentes de Aprovação</a>
         <a href="?aba=transito" class="<?php echo $aba=='transito'?'active':'';?>">Em Trânsito</a>
-        <a href="?aba=historico" class="<?php echo $aba=='historico'?'active':'';?>">Histórico</a>
     </div>
     <table>
         <tr>
@@ -444,10 +443,6 @@ $res = $conn->query($sql_lista);
         <?php endwhile; ?>
         <?php endif; ?>
     </table>
-    <div style="margin-top: 20px;">
-        <a href="../../index.html" class="btn">Página Inicial</a>
-        <a href="solicitar.php" class="btn btn-success">Nova Solicitação</a>
-    </div>
 </div>
 </body>
 </html>

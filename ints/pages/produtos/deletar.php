@@ -81,14 +81,14 @@ try {
     $conn->commit();
 
     // Redireciona para a tabela de produtos com mensagem de sucesso
-    header("Location: listar.php?sucesso=soft_delete");
+    header("Location: index.php?sucesso=soft_delete");
     exit();
 
 } catch (Exception $e) {
     // Em caso de erro, reverte a transação
     $conn->rollback();
     error_log("Erro ao tentar fazer Soft Delete do produto {$produto_id}: " . $e->getMessage());
-    header("Location: listar.php?erro=delete_falhou");
+    header("Location: index.php?erro=delete_falhou");
     exit();
 }
 ?>

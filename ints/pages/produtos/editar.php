@@ -238,8 +238,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 if(function_exists('registrarLog')) registrarLog($conn, $usuario_id_log, 'produtos', $produto_id, 'EDICAO', "Produto editado.", $produto_id);
 
                 $conn->commit();
-                header("Location: listar.php?sucesso=editado");
-                exit;
+                if (isset($_GET['modal'])) {
+                    echo "<script>
+                        alert('Operação realizada com sucesso!');
+                        parent.fecharModalDoFilho(true);
+                    </script>";
+                    exit;
+                } else {
+                    // Comportamento normal se acessar direto
+                    header("Location: index.php?sucesso=1");
+                    exit;
+                }
 
             } catch (Exception $e) {
                 $conn->rollback();
@@ -396,7 +405,6 @@ $caminho_categoria_json = json_encode($caminho_categoria);
 <body>
     <div class="container">
         <h1>Editar Produto</h1>
-        <p><a href="listar.php">Voltar</a></p>
         <?php echo $status_message; ?>
 
         <form method="POST" enctype="multipart/form-data">

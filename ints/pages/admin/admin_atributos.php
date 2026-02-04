@@ -125,7 +125,6 @@ $conn->close();
 <body>
     <div class="container">
         <h1>Gerenciar Atributos (EAV)</h1>
-        <p><a href="../../index.html">Home</a> | <a href="admin_categorias.php">Categorias</a> | <a href="admin_categoria_atributo.php">Vincular</a></p>
         <?php echo $status_message; ?>
 
         <h2><?php echo $modo_edicao ? 'Editar Atributo' : 'Novo Atributo'; ?></h2>
