@@ -85,6 +85,13 @@ $grupos_admin = [
     ],
     'Manutenção' => [
         [
+            'titulo' => 'Baixas em Estoque',
+            'desc' => 'Gerenciar baixas de produtos nos locais',
+            'link' => 'gerenciar_baixas.php',
+            'icone' => '⚠️',
+            'cor' => '#fbff29'
+        ],
+        [
             'titulo' => 'Lixeira de Produtos',
             'desc' => 'Restaurar ou excluir permanentemente itens.',
             'link' => 'admin_produtos_deletados.php',
