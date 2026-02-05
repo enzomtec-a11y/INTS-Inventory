@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`usuarios` (
   UNIQUE INDEX `email` (`email` ASC) VISIBLE,
   INDEX `idx_usuarios_unidade` (`unidade_id` ASC) VISIBLE)
 ENGINE = InnoDB
-AUTO_INCREMENT = 8
+AUTO_INCREMENT = 9
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -70,9 +70,11 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   `controla_estoque_proprio` TINYINT(1) NULL DEFAULT 1,
   `tipo_posse` ENUM('proprio', 'locado') NOT NULL DEFAULT 'proprio',
   `locador_nome` VARCHAR(255) NULL DEFAULT NULL,
+  `locacao_contrato` VARCHAR(100) NULL DEFAULT NULL,
   `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
   `data_atualizado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
   `deletado` TINYINT(1) NULL DEFAULT 0,
+  `status_produto` ENUM('ativo', 'baixa_parcial', 'baixa_total', 'inativo') NOT NULL DEFAULT 'ativo',
   PRIMARY KEY (`id`),
   UNIQUE INDEX `numero_patrimonio` (`numero_patrimonio` ASC) VISIBLE,
   INDEX `idx_produtos_categoria` (`categoria_id` ASC) VISIBLE,
@@ -82,7 +84,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
     FOREIGN KEY (`categoria_id`)
     REFERENCES `ints_db`.`categorias` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 18
+AUTO_INCREMENT = 3
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -108,7 +110,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`acoes_log` (
     FOREIGN KEY (`produto_id`)
     REFERENCES `ints_db`.`produtos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 50
+AUTO_INCREMENT = 13
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -139,7 +141,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_definicao` (
   `tipo` VARCHAR(50) NOT NULL,
   PRIMARY KEY (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 12
+AUTO_INCREMENT = 13
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -178,7 +180,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_opcoes` (
     FOREIGN KEY (`atributo_id`)
     REFERENCES `ints_db`.`atributos_definicao` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 4
+AUTO_INCREMENT = 9
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -195,7 +197,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_valores_permitidos` (
     FOREIGN KEY (`atributo_id`)
     REFERENCES `ints_db`.`atributos_definicao` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 4
+AUTO_INCREMENT = 3
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -227,7 +229,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_valor` (
     FOREIGN KEY (`valor_permitido_id`)
     REFERENCES `ints_db`.`atributos_valores_permitidos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 98
+AUTO_INCREMENT = 9
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -255,45 +257,24 @@ DEFAULT CHARACTER SET = latin1;
 
 
 -- -----------------------------------------------------
--- Table `ints_db`.`categoria_atributo`
+-- Table `ints_db`.`patrimonios`
 -- -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo` (
+CREATE TABLE IF NOT EXISTS `ints_db`.`patrimonios` (
   `id` INT(11) NOT NULL AUTO_INCREMENT,
-  `categoria_id` INT(11) NOT NULL,
-  `atributo_id` INT(11) NOT NULL,
-  `obrigatorio` TINYINT(1) NULL DEFAULT 0,
+  `produto_id` INT(11) NOT NULL,
+  `numero_patrimonio` VARCHAR(100) NULL DEFAULT NULL,
+  `numero_serie` VARCHAR(255) NULL DEFAULT NULL,
+  `local_id` INT(11) NULL DEFAULT NULL,
+  `status` ENUM('ativo', 'emprestado', 'manutencao', 'desativado') NOT NULL DEFAULT 'ativo',
+  `data_aquisicao` DATE NULL DEFAULT NULL,
+  `observacoes` TEXT NULL DEFAULT NULL,
+  `criado_por` INT(11) NULL DEFAULT NULL,
+  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
   PRIMARY KEY (`id`),
-  INDEX `atributo_id` (`atributo_id` ASC) VISIBLE,
-  INDEX `idx_categoria_atributo_lookup` (`categoria_id` ASC, `atributo_id` ASC) VISIBLE,
-  CONSTRAINT `categoria_atributo_ibfk_1`
-    FOREIGN KEY (`categoria_id`)
-    REFERENCES `ints_db`.`categorias` (`id`),
-  CONSTRAINT `categoria_atributo_ibfk_2`
-    FOREIGN KEY (`atributo_id`)
-    REFERENCES `ints_db`.`atributos_definicao` (`id`))
+  UNIQUE INDEX `uk_patrimonio_num` (`numero_patrimonio` ASC) VISIBLE,
+  INDEX `idx_patr_prod` (`produto_id` ASC) VISIBLE,
+  INDEX `idx_patr_local` (`local_id` ASC) VISIBLE)
 ENGINE = InnoDB
-AUTO_INCREMENT = 14
-DEFAULT CHARACTER SET = latin1;
-
-
--- -----------------------------------------------------
--- Table `ints_db`.`categoria_atributo_opcao`
--- -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo_opcao` (
-  `id` INT(11) NOT NULL AUTO_INCREMENT,
-  `categoria_id` INT(11) NOT NULL,
-  `atributo_opcao_id` INT(11) NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE INDEX `uk_cat_attr_op` (`categoria_id` ASC, `atributo_opcao_id` ASC) VISIBLE,
-  INDEX `atributo_opcao_id` (`atributo_opcao_id` ASC) VISIBLE,
-  CONSTRAINT `categoria_atributo_opcao_ibfk_1`
-    FOREIGN KEY (`categoria_id`)
-    REFERENCES `ints_db`.`categorias` (`id`),
-  CONSTRAINT `categoria_atributo_opcao_ibfk_2`
-    FOREIGN KEY (`atributo_opcao_id`)
-    REFERENCES `ints_db`.`atributos_opcoes` (`id`))
-ENGINE = InnoDB
-AUTO_INCREMENT = 7
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -318,6 +299,99 @@ DEFAULT CHARACTER SET = latin1;
 
 
 -- -----------------------------------------------------
+-- Table `ints_db`.`baixas`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`baixas` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `produto_id` INT(11) NOT NULL,
+  `patrimonio_id` INT(11) NULL DEFAULT NULL,
+  `quantidade` DECIMAL(12,4) NOT NULL DEFAULT 1.0000,
+  `local_id` INT(11) NULL DEFAULT NULL,
+  `motivo` ENUM('perda', 'dano', 'obsolescencia', 'devolucao_locacao', 'descarte', 'doacao', 'roubo', 'outro') NOT NULL,
+  `descricao` TEXT NOT NULL,
+  `data_baixa` DATE NOT NULL,
+  `valor_contabil` DECIMAL(12,2) NULL DEFAULT NULL,
+  `responsavel_id` INT(11) NULL DEFAULT NULL,
+  `aprovador_id` INT(11) NULL DEFAULT NULL,
+  `documentos_anexos` TEXT NULL DEFAULT NULL,
+  `criado_por` INT(11) NOT NULL,
+  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  `status` ENUM('pendente', 'aprovada', 'rejeitada', 'cancelada') NOT NULL DEFAULT 'pendente',
+  PRIMARY KEY (`id`),
+  INDEX `idx_baixas_produto` (`produto_id` ASC) VISIBLE,
+  INDEX `idx_baixas_patrimonio` (`patrimonio_id` ASC) VISIBLE,
+  INDEX `idx_baixas_data` (`data_baixa` ASC) VISIBLE,
+  INDEX `idx_baixas_status` (`status` ASC) VISIBLE,
+  INDEX `baixas_ibfk_3` (`local_id` ASC) VISIBLE,
+  INDEX `baixas_ibfk_4` (`criado_por` ASC) VISIBLE,
+  INDEX `baixas_ibfk_5` (`responsavel_id` ASC) VISIBLE,
+  INDEX `baixas_ibfk_6` (`aprovador_id` ASC) VISIBLE,
+  CONSTRAINT `baixas_ibfk_1`
+    FOREIGN KEY (`produto_id`)
+    REFERENCES `ints_db`.`produtos` (`id`),
+  CONSTRAINT `baixas_ibfk_2`
+    FOREIGN KEY (`patrimonio_id`)
+    REFERENCES `ints_db`.`patrimonios` (`id`),
+  CONSTRAINT `baixas_ibfk_3`
+    FOREIGN KEY (`local_id`)
+    REFERENCES `ints_db`.`locais` (`id`),
+  CONSTRAINT `baixas_ibfk_4`
+    FOREIGN KEY (`criado_por`)
+    REFERENCES `ints_db`.`usuarios` (`id`),
+  CONSTRAINT `baixas_ibfk_5`
+    FOREIGN KEY (`responsavel_id`)
+    REFERENCES `ints_db`.`usuarios` (`id`),
+  CONSTRAINT `baixas_ibfk_6`
+    FOREIGN KEY (`aprovador_id`)
+    REFERENCES `ints_db`.`usuarios` (`id`))
+ENGINE = InnoDB
+DEFAULT CHARACTER SET = utf8mb4;
+
+
+-- -----------------------------------------------------
+-- Table `ints_db`.`categoria_atributo`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `categoria_id` INT(11) NOT NULL,
+  `atributo_id` INT(11) NOT NULL,
+  `obrigatorio` TINYINT(1) NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  INDEX `atributo_id` (`atributo_id` ASC) VISIBLE,
+  INDEX `idx_categoria_atributo_lookup` (`categoria_id` ASC, `atributo_id` ASC) VISIBLE,
+  CONSTRAINT `categoria_atributo_ibfk_1`
+    FOREIGN KEY (`categoria_id`)
+    REFERENCES `ints_db`.`categorias` (`id`),
+  CONSTRAINT `categoria_atributo_ibfk_2`
+    FOREIGN KEY (`atributo_id`)
+    REFERENCES `ints_db`.`atributos_definicao` (`id`))
+ENGINE = InnoDB
+AUTO_INCREMENT = 9
+DEFAULT CHARACTER SET = latin1;
+
+
+-- -----------------------------------------------------
+-- Table `ints_db`.`categoria_atributo_opcao`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo_opcao` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `categoria_id` INT(11) NOT NULL,
+  `atributo_opcao_id` INT(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uk_cat_attr_op` (`categoria_id` ASC, `atributo_opcao_id` ASC) VISIBLE,
+  INDEX `atributo_opcao_id` (`atributo_opcao_id` ASC) VISIBLE,
+  CONSTRAINT `categoria_atributo_opcao_ibfk_1`
+    FOREIGN KEY (`categoria_id`)
+    REFERENCES `ints_db`.`categorias` (`id`),
+  CONSTRAINT `categoria_atributo_opcao_ibfk_2`
+    FOREIGN KEY (`atributo_opcao_id`)
+    REFERENCES `ints_db`.`atributos_opcoes` (`id`))
+ENGINE = InnoDB
+AUTO_INCREMENT = 6
+DEFAULT CHARACTER SET = latin1;
+
+
+-- -----------------------------------------------------
 -- Table `ints_db`.`estoques`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `ints_db`.`estoques` (
@@ -338,7 +412,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`estoques` (
     FOREIGN KEY (`local_id`)
     REFERENCES `ints_db`.`locais` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 17
+AUTO_INCREMENT = 5
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -383,29 +457,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`movimentacoes` (
     FOREIGN KEY (`usuario_id`)
     REFERENCES `ints_db`.`usuarios` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 7
-DEFAULT CHARACTER SET = latin1;
-
-
--- -----------------------------------------------------
--- Table `ints_db`.`patrimonios`
--- -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS `ints_db`.`patrimonios` (
-  `id` INT(11) NOT NULL AUTO_INCREMENT,
-  `produto_id` INT(11) NOT NULL,
-  `numero_patrimonio` VARCHAR(100) NULL DEFAULT NULL,
-  `numero_serie` VARCHAR(255) NULL DEFAULT NULL,
-  `local_id` INT(11) NULL DEFAULT NULL,
-  `status` ENUM('ativo', 'emprestado', 'manutencao', 'desativado') NOT NULL DEFAULT 'ativo',
-  `data_aquisicao` DATE NULL DEFAULT NULL,
-  `observacoes` TEXT NULL DEFAULT NULL,
-  `criado_por` INT(11) NULL DEFAULT NULL,
-  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
-  PRIMARY KEY (`id`),
-  UNIQUE INDEX `uk_patrimonio_num` (`numero_patrimonio` ASC) VISIBLE,
-  INDEX `idx_patr_prod` (`produto_id` ASC) VISIBLE,
-  INDEX `idx_patr_local` (`local_id` ASC) VISIBLE)
-ENGINE = InnoDB
+AUTO_INCREMENT = 4
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -466,23 +518,27 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`vw_patrimonio_detalhado` (`patrimonio_id` 
 
 DELIMITER $$
 USE `ints_db`$$
-CREATE DEFINER=`root`@`localhost` FUNCTION `gerar_numero_patrimonio`(p_unidade_id INT,
-    p_categoria_id INT,
-    p_produto_id INT
-) RETURNS varchar(100) CHARSET utf8mb4 COLLATE utf8mb4_general_ci
+CREATE DEFINER=`root`@`localhost` FUNCTION `gerar_numero_patrimonio`(p_unidade_id INT, p_categoria_id INT, p_produto_id INT) RETURNS varchar(50) CHARSET utf8mb4 COLLATE utf8mb4_general_ci
     DETERMINISTIC
 BEGIN
-    DECLARE num_patrimonio VARCHAR(100);
+    DECLARE novo_codigo VARCHAR(50);
+    DECLARE sequencial INT;
     
-    -- Formato: UNIDADE-CATEGORIA-PRODUTO
-    -- Pads com zeros à esquerda para manter tamanho consistente
-    SET num_patrimonio = CONCAT(
-        LPAD(IFNULL(p_unidade_id, 0), 3, '0'), '-',
-        LPAD(p_categoria_id, 3, '0'), '-',
-        LPAD(p_produto_id, 6, '0')
+    -- Se não houver unidade definida, usa 0
+    SET p_unidade_id = IFNULL(p_unidade_id, 0);
+    
+    -- Pega o próximo número baseado no ID do produto (ou você pode criar uma tabela de sequenciais se preferir)
+    -- Aqui estou usando o próprio ID do produto com padding de zeros para simplificar e garantir unicidade
+    SET sequencial = p_produto_id;
+    
+    -- Formato: UUU-CCC-PPPPPP (Unidade-Categoria-Produto)
+    SET novo_codigo = CONCAT(
+        LPAD(p_unidade_id, 3, '0'), '-', 
+        LPAD(p_categoria_id, 3, '0'), '-', 
+        LPAD(sequencial, 6, '0')
     );
     
-    RETURN num_patrimonio;
+    RETURN novo_codigo;
 END$$
 
 DELIMITER ;
