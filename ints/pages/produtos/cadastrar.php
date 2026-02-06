@@ -1,5 +1,6 @@
 <?php
 require_once '../../config/_protecao.php';
+exigirAdmin(); //Por enquanto somente admins vão cadastrar produtos
 
 $status_message = "";
 $usuario_id_log = function_exists('getUsuarioId') ? getUsuarioId() : 0;
@@ -149,10 +150,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $conn->begin_transaction();
                 try {
                     // 1. Inserir Produto
+                    // ATENÇÃO: A ordem no SQL abaixo é: locador, contrato, patrimonio
                     $sql = "INSERT INTO produtos (nome, descricao, categoria_id, controla_estoque_proprio, tipo_posse, locador_nome, locacao_contrato, numero_patrimonio, data_criado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
                     $stmt = $conn->prepare($sql);
+                    
                     // Tipos: s(nome), s(desc), i(cat), i(ctrl), s(tipo), s(locador), s(contrato), s(patrimonio)
+                    // A ordem das variáveis deve bater EXATAMENTE com a ordem dos campos no INSERT acima
                     $stmt->bind_param("ssiissss", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_nome, $locacao_contrato, $numero_patrimonio);
+                    
                     $stmt->execute();
                     $produto_id = $stmt->insert_id;
                     $stmt->close();
