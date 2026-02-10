@@ -24,7 +24,12 @@ $categorias = [];
 $res_cat = $conn->query("SELECT id, nome FROM categorias WHERE deletado = FALSE ORDER BY nome");
 while ($r = $res_cat->fetch_assoc()) $categorias[] = $r;
 
-// Captura filtros
+// Buscar todos os atributos disponíveis para filtros avançados
+$atributos_disponiveis = [];
+$res_attr = $conn->query("SELECT id, nome, tipo FROM atributos_definicao ORDER BY nome");
+while ($r = $res_attr->fetch_assoc()) $atributos_disponiveis[] = $r;
+
+// Captura filtros básicos
 $filtro_id = $_GET['busca_id'] ?? '';
 $filtro_nome = $_GET['busca_nome'] ?? '';
 $filtro_cat = $_GET['filtro_categoria'] ?? '';
@@ -32,6 +37,17 @@ $filtro_local = $_GET['filtro_local'] ?? '';
 $filtro_tipo_posse = $_GET['filtro_tipo_posse'] ?? '';
 $filtro_patrimonio = $_GET['busca_patrimonio'] ?? '';
 $filtro_status = $_GET['filtro_status'] ?? '';
+
+// Captura filtros avançados
+$filtro_locador = $_GET['filtro_locador'] ?? '';
+$filtro_contrato = $_GET['filtro_contrato'] ?? '';
+$filtros_atributos = [];
+foreach ($_GET as $key => $value) {
+    if (strpos($key, 'attr_') === 0 && !empty($value)) {
+        $attr_id = str_replace('attr_', '', $key);
+        $filtros_atributos[$attr_id] = $value;
+    }
+}
 
 // Montagem da Query
 $sql = "
@@ -41,11 +57,14 @@ $sql = "
         p.numero_patrimonio, 
         p.tipo_posse, 
         p.locador_nome,
+        p.numero_contrato,
         p.status_produto,
         c.nome AS categoria_nome, 
         l.id AS local_id, 
         IFNULL(l.nome, 'N/A') AS local_nome_simples,
+        ad.id AS atributo_id,
         ad.nome AS atributo_nome,
+        ad.tipo AS atributo_tipo,
         COALESCE(av.valor_texto, CAST(av.valor_numero AS CHAR), CAST(av.valor_booleano AS CHAR), av.valor_data) AS atributo_valor
     FROM produtos p
     JOIN categorias c ON p.categoria_id = c.id
@@ -74,11 +93,21 @@ if (!empty($filtro_patrimonio)) {
     $params[] = "%$filtro_patrimonio%"; 
     $types .= "s"; 
 }
-if (!empty($filtro_cat)) { 
-    $sql .= " AND p.categoria_id = ?"; 
-    $params[] = (int)$filtro_cat; 
-    $types .= "i"; 
+
+// Filtro hierárquico de categorias (agora funciona com subcategorias)
+if (!empty($filtro_cat)) {
+    if (function_exists('getIdsCategoriasDaHierarquia')) {
+        $ids_hierarquia_cat = getIdsCategoriasDaHierarquia($conn, (int)$filtro_cat);
+    } else {
+        $ids_hierarquia_cat = [(int)$filtro_cat];
+    }
+    if (!empty($ids_hierarquia_cat)) {
+        $idsStrCat = implode(',', array_map('intval', $ids_hierarquia_cat));
+        $sql .= " AND p.categoria_id IN ($idsStrCat)";
+    }
 }
+
+// Filtro hierárquico de locais
 if (!empty($filtro_local)) {
     $ids_hierarquia_filtro = function_exists('getIdsLocaisDaUnidade') ? getIdsLocaisDaUnidade($conn, (int)$filtro_local) : [(int)$filtro_local];
     if (!empty($ids_hierarquia_filtro)) {
@@ -86,6 +115,7 @@ if (!empty($filtro_local)) {
         $sql .= " AND e.local_id IN ($idsStrFiltro)";
     }
 }
+
 if (!empty($filtro_tipo_posse)) { 
     $sql .= " AND p.tipo_posse = ?"; 
     $params[] = $filtro_tipo_posse; 
@@ -95,6 +125,41 @@ if (!empty($filtro_status)) {
     $sql .= " AND p.status_produto = ?"; 
     $params[] = $filtro_status; 
     $types .= "s"; 
+}
+if (!empty($filtro_locador)) { 
+    $sql .= " AND p.locador_nome LIKE ?"; 
+    $params[] = "%$filtro_locador%"; 
+    $types .= "s"; 
+}
+if (!empty($filtro_contrato)) { 
+    $sql .= " AND p.numero_contrato LIKE ?"; 
+    $params[] = "%$filtro_contrato%"; 
+    $types .= "s"; 
+}
+
+// Filtro por atributos
+if (!empty($filtros_atributos)) {
+    foreach ($filtros_atributos as $attr_id => $valor_filtro) {
+        $sql .= " AND EXISTS (
+            SELECT 1 FROM atributos_valor av2 
+            WHERE av2.produto_id = p.id 
+            AND av2.atributo_id = ?
+            AND (
+                av2.valor_texto LIKE ? OR 
+                CAST(av2.valor_numero AS CHAR) LIKE ? OR 
+                CAST(av2.valor_booleano AS CHAR) LIKE ? OR 
+                av2.valor_data LIKE ?
+            )
+        )";
+        $params[] = (int)$attr_id;
+        $types .= "i";
+        $valor_like = "%$valor_filtro%";
+        $params[] = $valor_like;
+        $params[] = $valor_like;
+        $params[] = $valor_like;
+        $params[] = $valor_like;
+        $types .= "ssss";
+    }
 }
 
 if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
@@ -121,6 +186,7 @@ if ($result) {
                 'categoria' => $row['categoria_nome'], 
                 'tipo_posse' => $row['tipo_posse'], 
                 'locador_nome' => $row['locador_nome'],
+                'numero_contrato' => $row['numero_contrato'],
                 'status_produto' => $row['status_produto'] ?? 'ativo',
                 'atributos' => [], 
                 'estoques' => []
@@ -128,7 +194,8 @@ if ($result) {
         }
         if (!empty($row['atributo_nome'])) {
             $val = $row['atributo_valor'];
-            if ($val === '1') $val = 'Sim'; if ($val === '0') $val = 'Não';
+            if ($val === '1') $val = 'Sim'; 
+            if ($val === '0') $val = 'Não';
             $produtos_agregados[$pid]['atributos'][$row['atributo_nome']] = $val;
         }
         $lid = $row['local_id'];
@@ -141,6 +208,19 @@ if ($result) {
     }
 }
 $stmt->close();
+
+// Contar filtros ativos
+$filtros_ativos = 0;
+if ($filtro_id) $filtros_ativos++;
+if ($filtro_nome) $filtros_ativos++;
+if ($filtro_cat) $filtros_ativos++;
+if ($filtro_local) $filtros_ativos++;
+if ($filtro_patrimonio) $filtros_ativos++;
+if ($filtro_status) $filtros_ativos++;
+if ($filtro_tipo_posse) $filtros_ativos++;
+if ($filtro_locador) $filtros_ativos++;
+if ($filtro_contrato) $filtros_ativos++;
+$filtros_ativos += count($filtros_atributos);
 ?>
 
 <!DOCTYPE html>
@@ -168,6 +248,8 @@ $stmt->close();
         .filter-grid input, .filter-grid select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;}
         .filter-grid label { font-size: 0.85em; color: #555; margin-bottom: 3px; display: block; }
         .btn-filter { background: #007bff; color: white; border: none; padding: 9px 15px; border-radius: 4px; cursor: pointer; }
+        .btn-filter-advanced { background: #6c757d; color: white; border: none; padding: 9px 15px; border-radius: 4px; cursor: pointer; position: relative; }
+        .filter-badge { position: absolute; top: -8px; right: -8px; background: #dc3545; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.7em; font-weight: bold; }
 
         table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         th { background-color: #343a40; color: #fff; padding: 12px; text-align: left; font-size: 0.85em; white-space: nowrap; }
@@ -205,6 +287,33 @@ $stmt->close();
         .status-baixa-total { background: #f8d7da; color: #721c24; }
         .status-inativo { background: #e2e3e5; color: #383d41; }
         
+        .atributos-list {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 4px;
+        }
+        .atributo-item {
+            display: inline-block;
+            margin-right: 10px;
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .atributo-label {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .locacao-info {
+            font-size: 0.8em;
+            color: #856404;
+            background: #fff3cd;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-top: 4px;
+            display: inline-block;
+        }
+        
         .btn-action { margin-right: 5px; text-decoration: none; padding: 4px 8px; border-radius: 3px; font-size: 0.85em; cursor: pointer; display: inline-block; border: none; }
         .btn-view { background: #17a2b8; color: white; }
         .btn-edit { background: #ffc107; color: #333; }
@@ -231,6 +340,64 @@ $stmt->close();
         .modal-close { background: none; border: none; font-size: 1.5em; cursor: pointer; color: #666; }
         
         .modal-content-frame { flex: 1; border: none; width: 100%; background: #fff; }
+        
+        /* Modal de filtros avançados */
+        .advanced-filter-modal {
+            background: #fff; width: 90%; max-width: 600px; max-height: 80%;
+            border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            display: flex; flex-direction: column; overflow: hidden;
+            animation: slideIn 0.3s ease;
+        }
+        .advanced-filter-content {
+            flex: 1; overflow-y: auto; padding: 20px;
+        }
+        .filter-section {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .filter-section:last-child {
+            border-bottom: none;
+        }
+        .filter-section h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 1em;
+        }
+        .form-row {
+            margin-bottom: 12px;
+        }
+        .form-row label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            font-size: 0.9em;
+            color: #555;
+        }
+        .form-row input, .form-row select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .modal-footer {
+            padding: 15px;
+            background: #f8f9fa;
+            border-top: 1px solid #ddd;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
 
         @keyframes slideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
@@ -359,8 +526,14 @@ $stmt->close();
                 </div>
 
                 <button type="submit" class="btn-filter">Filtrar</button>
-                <?php if ($filtro_id || $filtro_nome || $filtro_cat || $filtro_local || $filtro_patrimonio || $filtro_status): ?>
-                    <a href="index.php" style="color:#666; font-size:0.9em; padding:8px;">Limpar</a>
+                <button type="button" onclick="abrirFiltrosAvancados()" class="btn-filter-advanced">
+                    ⚙️ Avançado
+                    <?php if ($filtros_ativos > 6): ?>
+                        <span class="filter-badge"><?php echo $filtros_ativos - 6; ?></span>
+                    <?php endif; ?>
+                </button>
+                <?php if ($filtros_ativos > 0): ?>
+                    <a href="index.php" style="color:#666; font-size:0.9em; padding:8px;">Limpar (<?php echo $filtros_ativos; ?>)</a>
                 <?php endif; ?>
             </form>
         </div>
@@ -370,11 +543,11 @@ $stmt->close();
                 <thead>
                     <tr>
                         <th style="width: 70px;">ID</th>
-                        <th style="width: 120px;">Patrimônio</th>
-                        <th>Nome</th>
-                        <th style="width: 150px;">Categoria</th>
+                        <th style="width: 130px;">Patrimônio</th>
+                        <th>Nome / Atributos</th>
+                        <th style="width: 140px;">Categoria</th>
                         <th style="width: 150px;">Localização</th>
-                        <th style="width: 120px;">Status</th>
+                        <th style="width: 110px;">Status</th>
                         <th style="width: 150px; text-align:right;">Ações</th>
                     </tr>
                 </thead>
@@ -416,13 +589,53 @@ $stmt->close();
                             <?php endif; ?>
                         </td>
                         <td>
-                            <strong><?php echo htmlspecialchars($prod['nome']); ?></strong>
-                            <?php if ($prod['tipo_posse'] == 'locado'): ?>
-                                <small style="background:#ffc107; padding:2px 6px; border-radius:3px; margin-left:5px; font-size:0.75em;">Locado</small>
+                            <div>
+                                <strong><?php echo htmlspecialchars($prod['nome']); ?></strong>
+                                <?php if ($prod['tipo_posse'] == 'locado'): ?>
+                                    <small style="background:#ffc107; padding:2px 6px; border-radius:3px; margin-left:5px; font-size:0.75em;">Locado</small>
+                                <?php endif; ?>
+                            </div>
+                            
+                            <?php if ($prod['tipo_posse'] == 'locado' && ($prod['locador_nome'] || $prod['numero_contrato'])): ?>
+                                <div class="locacao-info">
+                                    <?php if ($prod['locador_nome']): ?>
+                                        📋 <strong><?php echo htmlspecialchars($prod['locador_nome']); ?></strong>
+                                    <?php endif; ?>
+                                    <?php if ($prod['numero_contrato']): ?>
+                                        <?php if ($prod['locador_nome']) echo ' • '; ?>
+                                        Contrato: <strong><?php echo htmlspecialchars($prod['numero_contrato']); ?></strong>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($prod['atributos'])): ?>
+                                <div class="atributos-list">
+                                    <?php 
+                                    $count = 0;
+                                    foreach ($prod['atributos'] as $nome => $valor): 
+                                        if ($count >= 3) break; // Limitar a 3 atributos na listagem
+                                    ?>
+                                        <span class="atributo-item">
+                                            <span class="atributo-label"><?php echo htmlspecialchars($nome); ?>:</span> 
+                                            <?php echo htmlspecialchars($valor); ?>
+                                        </span>
+                                    <?php 
+                                        $count++;
+                                    endforeach; 
+                                    if (count($prod['atributos']) > 3):
+                                    ?>
+                                        <span style="color:#999;">+<?php echo count($prod['atributos']) - 3; ?> mais</span>
+                                    <?php endif; ?>
+                                </div>
                             <?php endif; ?>
                         </td>
                         <td><?php echo htmlspecialchars($prod['categoria']); ?></td>
-                        <td><?php echo htmlspecialchars($est['nome']); ?></td>
+                        <td>
+                            <?php echo htmlspecialchars($est['nome']); ?>
+                            <?php if (count($estoques) > 1): ?>
+                                <small style="color:#666; display:block; margin-top:2px;">+<?php echo count($estoques) - 1; ?> local(is)</small>
+                            <?php endif; ?>
+                        </td>
                         <td>
                             <span class="status-badge <?php echo $status_class; ?>">
                                 <?php echo $status_text; ?>
@@ -445,6 +658,7 @@ $stmt->close();
         <?php endif; ?>
     </main>
 
+    <!-- Modal Principal (para cadastrar/editar/detalhes) -->
     <div id="modalContainer" class="modal-overlay">
         <div class="modal-window">
             <div class="modal-header">
@@ -452,6 +666,67 @@ $stmt->close();
                 <button onclick="fecharModal(false)" class="modal-close">&times;</button>
             </div>
             <iframe id="modalFrame" class="modal-content-frame" src=""></iframe>
+        </div>
+    </div>
+
+    <!-- Modal de Filtros Avançados -->
+    <div id="modalFiltrosAvancados" class="modal-overlay">
+        <div class="advanced-filter-modal">
+            <div class="modal-header">
+                <span class="modal-title">🔍 Filtros Avançados</span>
+                <button onclick="fecharFiltrosAvancados()" class="modal-close">&times;</button>
+            </div>
+            <form id="formFiltrosAvancados" method="GET" class="advanced-filter-content">
+                <!-- Manter filtros básicos como hidden -->
+                <input type="hidden" name="busca_id" value="<?php echo htmlspecialchars($filtro_id); ?>">
+                <input type="hidden" name="busca_nome" value="<?php echo htmlspecialchars($filtro_nome); ?>">
+                <input type="hidden" name="busca_patrimonio" value="<?php echo htmlspecialchars($filtro_patrimonio); ?>">
+                <input type="hidden" name="filtro_categoria" value="<?php echo htmlspecialchars($filtro_cat); ?>">
+                <input type="hidden" name="filtro_local" value="<?php echo htmlspecialchars($filtro_local); ?>">
+                <input type="hidden" name="filtro_status" value="<?php echo htmlspecialchars($filtro_status); ?>">
+                
+                <div class="filter-section">
+                    <h3>📦 Informações de Locação</h3>
+                    <div class="form-row">
+                        <label>Tipo de Posse:</label>
+                        <select name="filtro_tipo_posse">
+                            <option value="">Todos</option>
+                            <option value="proprio" <?php echo ($filtro_tipo_posse == 'proprio') ? 'selected' : ''; ?>>Próprio</option>
+                            <option value="locado" <?php echo ($filtro_tipo_posse == 'locado') ? 'selected' : ''; ?>>Locado</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>Nome do Locador:</label>
+                        <input type="text" name="filtro_locador" value="<?php echo htmlspecialchars($filtro_locador); ?>" placeholder="Digite o nome do locador...">
+                    </div>
+                    <div class="form-row">
+                        <label>Número do Contrato:</label>
+                        <input type="text" name="filtro_contrato" value="<?php echo htmlspecialchars($filtro_contrato); ?>" placeholder="Digite o número do contrato...">
+                    </div>
+                </div>
+
+                <?php if (!empty($atributos_disponiveis)): ?>
+                <div class="filter-section">
+                    <h3>🏷️ Filtrar por Atributos</h3>
+                    <?php foreach ($atributos_disponiveis as $attr): ?>
+                        <div class="form-row">
+                            <label><?php echo htmlspecialchars($attr['nome']); ?>:</label>
+                            <?php
+                            $valor_atual = isset($filtros_atributos[$attr['id']]) ? $filtros_atributos[$attr['id']] : '';
+                            ?>
+                            <input type="text" 
+                                   name="attr_<?php echo $attr['id']; ?>" 
+                                   value="<?php echo htmlspecialchars($valor_atual); ?>" 
+                                   placeholder="Filtrar por <?php echo htmlspecialchars($attr['nome']); ?>...">
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+            </form>
+            <div class="modal-footer">
+                <button type="button" onclick="limparFiltrosAvancados()" class="btn-secondary">Limpar Filtros</button>
+                <button type="submit" form="formFiltrosAvancados" class="btn-filter">Aplicar Filtros</button>
+            </div>
         </div>
     </div>
 
@@ -473,6 +748,23 @@ $stmt->close();
 
         window.fecharModalDoFilho = function(recarregar) {
             fecharModal(recarregar);
+        }
+
+        function abrirFiltrosAvancados() {
+            document.getElementById('modalFiltrosAvancados').classList.add('active');
+        }
+
+        function fecharFiltrosAvancados() {
+            document.getElementById('modalFiltrosAvancados').classList.remove('active');
+        }
+
+        function limparFiltrosAvancados() {
+            const form = document.getElementById('formFiltrosAvancados');
+            const inputs = form.querySelectorAll('input[type="text"], select');
+            inputs.forEach(input => {
+                if (input.type === 'hidden') return; // Não limpar os hidden
+                input.value = '';
+            });
         }
     </script>
 </body>

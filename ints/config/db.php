@@ -47,6 +47,36 @@ function getIdsLocaisDaUnidade($conn, $unidade_id) {
     return array_unique($ids);
 }
 
+// Nova função para hierarquia de categorias
+function getIdsCategoriasDaHierarquia($conn, $categoria_id) {
+    $ids = [(int)$categoria_id];
+    
+    // Query recursiva para pegar filhos, netos, etc (subcategorias)
+    $sql = "
+        WITH RECURSIVE categoria_tree AS (
+            SELECT id, categoria_pai_id FROM categorias WHERE id = ? AND deletado = FALSE
+            UNION ALL
+            SELECT c.id, c.categoria_pai_id 
+            FROM categorias c
+            INNER JOIN categoria_tree ct ON c.categoria_pai_id = ct.id
+            WHERE c.deletado = FALSE
+        )
+        SELECT id FROM categoria_tree;
+    ";
+    
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param("i", $categoria_id);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        while ($row = $res->fetch_assoc()) {
+            $ids[] = (int)$row['id'];
+        }
+        $stmt->close();
+    }
+    return array_unique($ids);
+}
+
 // --- ATUALIZADA: getLocaisFormatados com filtro de unidade opcional ---
 function getLocaisFormatados($conn, $apenasSalas = false, $restricaoUnidadeId = null) {
     $locais = [];

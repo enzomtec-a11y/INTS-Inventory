@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   `controla_estoque_proprio` TINYINT(1) NULL DEFAULT 1,
   `tipo_posse` ENUM('proprio', 'locado') NOT NULL DEFAULT 'proprio',
   `locador_nome` VARCHAR(255) NULL DEFAULT NULL,
+  `numero_contrato` VARCHAR(100) NULL DEFAULT NULL,
   `locacao_contrato` VARCHAR(100) NULL DEFAULT NULL,
   `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
   `data_atualizado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
@@ -80,11 +81,15 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   INDEX `idx_produtos_categoria` (`categoria_id` ASC) VISIBLE,
   INDEX `idx_numero_patrimonio` (`numero_patrimonio` ASC) VISIBLE,
   INDEX `idx_local_inicial` (`local_id_inicial` ASC) VISIBLE,
+  INDEX `idx_status_produto` (`status_produto` ASC) VISIBLE,
+  INDEX `idx_tipo_posse` (`tipo_posse` ASC) VISIBLE,
+  INDEX `idx_locador_nome` (`locador_nome` ASC) VISIBLE,
+  INDEX `idx_numero_contrato` (`numero_contrato` ASC) VISIBLE,
   CONSTRAINT `produtos_ibfk_1`
     FOREIGN KEY (`categoria_id`)
     REFERENCES `ints_db`.`categorias` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 3
+AUTO_INCREMENT = 8
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -110,7 +115,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`acoes_log` (
     FOREIGN KEY (`produto_id`)
     REFERENCES `ints_db`.`produtos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 13
+AUTO_INCREMENT = 26
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -229,7 +234,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_valor` (
     FOREIGN KEY (`valor_permitido_id`)
     REFERENCES `ints_db`.`atributos_valores_permitidos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 9
+AUTO_INCREMENT = 28
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -349,6 +354,38 @@ DEFAULT CHARACTER SET = utf8mb4;
 
 
 -- -----------------------------------------------------
+-- Table `ints_db`.`baixas_historico`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`baixas_historico` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `produto_id` INT(11) NOT NULL,
+  `quantidade_baixa` DECIMAL(12,4) NOT NULL,
+  `local_id` INT(11) NULL DEFAULT NULL,
+  `motivo` ENUM('perda', 'quebra', 'obsolescencia', 'doacao', 'venda', 'roubo', 'outro') NOT NULL,
+  `descricao_motivo` TEXT NULL DEFAULT NULL,
+  `usuario_id` INT(11) NOT NULL,
+  `data_baixa` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  `documento_comprobatorio` VARCHAR(255) NULL DEFAULT NULL COMMENT 'Caminho para documento que comprova a baixa',
+  PRIMARY KEY (`id`),
+  INDEX `idx_produto` (`produto_id` ASC) VISIBLE,
+  INDEX `idx_usuario` (`usuario_id` ASC) VISIBLE,
+  INDEX `idx_data` (`data_baixa` ASC) VISIBLE,
+  INDEX `local_id` (`local_id` ASC) VISIBLE,
+  CONSTRAINT `baixas_historico_ibfk_1`
+    FOREIGN KEY (`produto_id`)
+    REFERENCES `ints_db`.`produtos` (`id`),
+  CONSTRAINT `baixas_historico_ibfk_2`
+    FOREIGN KEY (`usuario_id`)
+    REFERENCES `ints_db`.`usuarios` (`id`),
+  CONSTRAINT `baixas_historico_ibfk_3`
+    FOREIGN KEY (`local_id`)
+    REFERENCES `ints_db`.`locais` (`id`))
+ENGINE = InnoDB
+DEFAULT CHARACTER SET = utf8mb4
+COMMENT = 'Histórico de baixas de produtos';
+
+
+-- -----------------------------------------------------
 -- Table `ints_db`.`categoria_atributo`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo` (
@@ -366,7 +403,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`categoria_atributo` (
     FOREIGN KEY (`atributo_id`)
     REFERENCES `ints_db`.`atributos_definicao` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 9
+AUTO_INCREMENT = 13
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -412,7 +449,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`estoques` (
     FOREIGN KEY (`local_id`)
     REFERENCES `ints_db`.`locais` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 5
+AUTO_INCREMENT = 10
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -481,6 +518,32 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produto_relacionamento` (
     REFERENCES `ints_db`.`produtos` (`id`))
 ENGINE = InnoDB
 DEFAULT CHARACTER SET = latin1;
+
+
+-- -----------------------------------------------------
+-- Table `ints_db`.`produtos_status_historico`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`produtos_status_historico` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `produto_id` INT(11) NOT NULL,
+  `status_anterior` ENUM('ativo', 'baixa_parcial', 'baixa_total', 'inativo') NULL DEFAULT NULL,
+  `status_novo` ENUM('ativo', 'baixa_parcial', 'baixa_total', 'inativo') NOT NULL,
+  `usuario_id` INT(11) NOT NULL,
+  `data_alteracao` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  `observacoes` TEXT NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `idx_produto` (`produto_id` ASC) VISIBLE,
+  INDEX `idx_data` (`data_alteracao` ASC) VISIBLE,
+  INDEX `usuario_id` (`usuario_id` ASC) VISIBLE,
+  CONSTRAINT `produtos_status_historico_ibfk_1`
+    FOREIGN KEY (`produto_id`)
+    REFERENCES `ints_db`.`produtos` (`id`),
+  CONSTRAINT `produtos_status_historico_ibfk_2`
+    FOREIGN KEY (`usuario_id`)
+    REFERENCES `ints_db`.`usuarios` (`id`))
+ENGINE = InnoDB
+DEFAULT CHARACTER SET = utf8mb4
+COMMENT = 'Histórico de alterações de status dos produtos';
 
 
 -- -----------------------------------------------------
@@ -610,19 +673,6 @@ BEGIN
     IF ciclo_detectado = 1 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ciclo detectado na hierarquia de categorias';
     END IF;
-END$$
-
-USE `ints_db`$$
-CREATE
-DEFINER=`root`@`localhost`
-TRIGGER `ints_db`.`before_produto_insert_patrimonio`
-BEFORE INSERT ON `ints_db`.`produtos`
-FOR EACH ROW
-BEGIN
-    -- Gera o número de patrimônio baseado no próximo ID (AUTO_INCREMENT)
-    -- Nota: NEW.id ainda não está disponível no BEFORE INSERT,
-    -- então usaremos AFTER INSERT para atualizar
-    SET NEW.numero_patrimonio = NULL;
 END$$
 
 
