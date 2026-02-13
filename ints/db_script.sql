@@ -38,6 +38,84 @@ DEFAULT CHARACTER SET = latin1;
 
 
 -- -----------------------------------------------------
+-- Table `ints_db`.`locadores`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`locadores` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `nome` VARCHAR(200) NOT NULL,
+  `razao_social` VARCHAR(200) NULL DEFAULT NULL,
+  `cnpj` VARCHAR(18) NULL DEFAULT NULL,
+  `cpf` VARCHAR(14) NULL DEFAULT NULL,
+  `tipo_pessoa` ENUM('juridica', 'fisica') NOT NULL DEFAULT 'juridica',
+  `email` VARCHAR(150) NULL DEFAULT NULL,
+  `telefone` VARCHAR(20) NULL DEFAULT NULL,
+  `celular` VARCHAR(20) NULL DEFAULT NULL,
+  `endereco` VARCHAR(300) NULL DEFAULT NULL,
+  `cidade` VARCHAR(100) NULL DEFAULT NULL,
+  `estado` VARCHAR(2) NULL DEFAULT NULL,
+  `cep` VARCHAR(10) NULL DEFAULT NULL,
+  `contato_responsavel` VARCHAR(150) NULL DEFAULT NULL COMMENT 'Nome do responsável/representante',
+  `observacoes` TEXT NULL DEFAULT NULL,
+  `ativo` TINYINT(1) NULL DEFAULT 1,
+  `criado_por` INT(11) NULL DEFAULT NULL,
+  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  `data_atualizado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
+  PRIMARY KEY (`id`),
+  INDEX `idx_nome` (`nome` ASC) VISIBLE,
+  INDEX `idx_cnpj` (`cnpj` ASC) VISIBLE,
+  INDEX `idx_cpf` (`cpf` ASC) VISIBLE,
+  INDEX `idx_ativo` (`ativo` ASC) VISIBLE,
+  INDEX `criado_por` (`criado_por` ASC) VISIBLE,
+  CONSTRAINT `locadores_ibfk_1`
+    FOREIGN KEY (`criado_por`)
+    REFERENCES `ints_db`.`usuarios` (`id`))
+ENGINE = InnoDB
+AUTO_INCREMENT = 2
+DEFAULT CHARACTER SET = utf8mb4
+COMMENT = 'Cadastro de locadores/fornecedores';
+
+
+-- -----------------------------------------------------
+-- Table `ints_db`.`contratos_locacao`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`contratos_locacao` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `locador_id` INT(11) NOT NULL,
+  `numero_contrato` VARCHAR(100) NOT NULL,
+  `descricao` TEXT NULL DEFAULT NULL COMMENT 'Descrição do que está sendo locado',
+  `valor_mensal` DECIMAL(12,2) NULL DEFAULT NULL,
+  `valor_total` DECIMAL(12,2) NULL DEFAULT NULL,
+  `data_inicio` DATE NOT NULL,
+  `data_fim` DATE NULL DEFAULT NULL,
+  `data_vencimento_pagamento` INT(11) NULL DEFAULT NULL COMMENT 'Dia do mês para vencimento (1-31)',
+  `renovacao_automatica` TINYINT(1) NULL DEFAULT 0,
+  `observacoes` TEXT NULL DEFAULT NULL,
+  `arquivo_contrato` VARCHAR(255) NULL DEFAULT NULL COMMENT 'Caminho do arquivo PDF do contrato',
+  `status` ENUM('ativo', 'vencido', 'cancelado', 'suspenso') NULL DEFAULT 'ativo',
+  `criado_por` INT(11) NULL DEFAULT NULL,
+  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  `data_atualizado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uk_numero_contrato` (`numero_contrato` ASC) VISIBLE,
+  INDEX `idx_locador` (`locador_id` ASC) VISIBLE,
+  INDEX `idx_numero` (`numero_contrato` ASC) VISIBLE,
+  INDEX `idx_status` (`status` ASC) VISIBLE,
+  INDEX `idx_datas` (`data_inicio` ASC, `data_fim` ASC) VISIBLE,
+  INDEX `criado_por` (`criado_por` ASC) VISIBLE,
+  INDEX `idx_contratos_status_datas` (`status` ASC, `data_inicio` ASC, `data_fim` ASC) VISIBLE,
+  CONSTRAINT `contratos_locacao_ibfk_1`
+    FOREIGN KEY (`locador_id`)
+    REFERENCES `ints_db`.`locadores` (`id`),
+  CONSTRAINT `contratos_locacao_ibfk_2`
+    FOREIGN KEY (`criado_por`)
+    REFERENCES `ints_db`.`usuarios` (`id`))
+ENGINE = InnoDB
+AUTO_INCREMENT = 2
+DEFAULT CHARACTER SET = utf8mb4
+COMMENT = 'Contratos de locação ativos e histórico';
+
+
+-- -----------------------------------------------------
 -- Table `ints_db`.`categorias`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `ints_db`.`categorias` (
@@ -72,6 +150,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   `locador_nome` VARCHAR(255) NULL DEFAULT NULL,
   `numero_contrato` VARCHAR(100) NULL DEFAULT NULL,
   `locacao_contrato` VARCHAR(100) NULL DEFAULT NULL,
+  `contrato_locacao_id` INT(11) NULL DEFAULT NULL COMMENT 'ID do contrato de locação (se produto for locado)',
   `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
   `data_atualizado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
   `deletado` TINYINT(1) NULL DEFAULT 0,
@@ -85,6 +164,12 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   INDEX `idx_tipo_posse` (`tipo_posse` ASC) VISIBLE,
   INDEX `idx_locador_nome` (`locador_nome` ASC) VISIBLE,
   INDEX `idx_numero_contrato` (`numero_contrato` ASC) VISIBLE,
+  INDEX `idx_contrato_locacao` (`contrato_locacao_id` ASC) VISIBLE,
+  INDEX `idx_produtos_tipo_posse_status` (`tipo_posse` ASC, `status_produto` ASC) VISIBLE,
+  CONSTRAINT `fk_produto_contrato`
+    FOREIGN KEY (`contrato_locacao_id`)
+    REFERENCES `ints_db`.`contratos_locacao` (`id`)
+    ON DELETE SET NULL,
   CONSTRAINT `produtos_ibfk_1`
     FOREIGN KEY (`categoria_id`)
     REFERENCES `ints_db`.`categorias` (`id`))
@@ -117,6 +202,37 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`acoes_log` (
 ENGINE = InnoDB
 AUTO_INCREMENT = 26
 DEFAULT CHARACTER SET = latin1;
+
+
+-- -----------------------------------------------------
+-- Table `ints_db`.`alertas_locacao`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`alertas_locacao` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `contrato_id` INT(11) NOT NULL,
+  `tipo_alerta` ENUM('vencimento_proximo', 'pagamento_atrasado', 'renovacao', 'documento_vencido') NOT NULL,
+  `mensagem` TEXT NOT NULL,
+  `data_alerta` DATE NOT NULL,
+  `visualizado` TINYINT(1) NULL DEFAULT 0,
+  `data_visualizacao` TIMESTAMP NULL DEFAULT NULL,
+  `usuario_visualizou` INT(11) NULL DEFAULT NULL,
+  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (`id`),
+  INDEX `idx_contrato` (`contrato_id` ASC) VISIBLE,
+  INDEX `idx_tipo` (`tipo_alerta` ASC) VISIBLE,
+  INDEX `idx_visualizado` (`visualizado` ASC) VISIBLE,
+  INDEX `idx_data_alerta` (`data_alerta` ASC) VISIBLE,
+  INDEX `usuario_visualizou` (`usuario_visualizou` ASC) VISIBLE,
+  CONSTRAINT `alertas_locacao_ibfk_1`
+    FOREIGN KEY (`contrato_id`)
+    REFERENCES `ints_db`.`contratos_locacao` (`id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `alertas_locacao_ibfk_2`
+    FOREIGN KEY (`usuario_visualizou`)
+    REFERENCES `ints_db`.`usuarios` (`id`))
+ENGINE = InnoDB
+DEFAULT CHARACTER SET = utf8mb4
+COMMENT = 'Alertas e notificações sobre contratos de locação';
 
 
 -- -----------------------------------------------------
@@ -272,13 +388,21 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`patrimonios` (
   `local_id` INT(11) NULL DEFAULT NULL,
   `status` ENUM('ativo', 'emprestado', 'manutencao', 'desativado') NOT NULL DEFAULT 'ativo',
   `data_aquisicao` DATE NULL DEFAULT NULL,
+  `valor_aquisicao` DECIMAL(12,2) NULL DEFAULT NULL COMMENT 'Valor de aquisição do patrimônio',
+  `vida_util_meses` INT(11) NULL DEFAULT NULL COMMENT 'Vida útil estimada em meses',
+  `fornecedor` VARCHAR(200) NULL DEFAULT NULL COMMENT 'Fornecedor/Loja de onde foi adquirido',
+  `nota_fiscal` VARCHAR(100) NULL DEFAULT NULL COMMENT 'Número da nota fiscal de aquisição',
+  `garantia_meses` INT(11) NULL DEFAULT NULL COMMENT 'Período de garantia em meses',
+  `data_fim_garantia` DATE NULL DEFAULT NULL COMMENT 'Data de término da garantia (calculado ou manual)',
   `observacoes` TEXT NULL DEFAULT NULL,
   `criado_por` INT(11) NULL DEFAULT NULL,
   `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_patrimonio_num` (`numero_patrimonio` ASC) VISIBLE,
   INDEX `idx_patr_prod` (`produto_id` ASC) VISIBLE,
-  INDEX `idx_patr_local` (`local_id` ASC) VISIBLE)
+  INDEX `idx_patr_local` (`local_id` ASC) VISIBLE,
+  INDEX `idx_patrimonios_status` (`status` ASC) VISIBLE,
+  INDEX `idx_patrimonios_produto` (`produto_id` ASC) VISIBLE)
 ENGINE = InnoDB
 DEFAULT CHARACTER SET = latin1;
 
@@ -499,6 +623,71 @@ DEFAULT CHARACTER SET = latin1;
 
 
 -- -----------------------------------------------------
+-- Table `ints_db`.`pagamentos_locacao`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`pagamentos_locacao` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `contrato_id` INT(11) NOT NULL,
+  `data_vencimento` DATE NOT NULL,
+  `valor` DECIMAL(12,2) NOT NULL,
+  `data_pagamento` DATE NULL DEFAULT NULL,
+  `valor_pago` DECIMAL(12,2) NULL DEFAULT NULL,
+  `status` ENUM('pendente', 'pago', 'atrasado', 'cancelado') NULL DEFAULT 'pendente',
+  `forma_pagamento` VARCHAR(50) NULL DEFAULT NULL COMMENT 'Boleto, PIX, Transferência, etc',
+  `comprovante` VARCHAR(255) NULL DEFAULT NULL COMMENT 'Caminho do arquivo de comprovante',
+  `observacoes` TEXT NULL DEFAULT NULL,
+  `usuario_id` INT(11) NULL DEFAULT NULL,
+  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  `data_atualizado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
+  PRIMARY KEY (`id`),
+  INDEX `idx_contrato` (`contrato_id` ASC) VISIBLE,
+  INDEX `idx_status` (`status` ASC) VISIBLE,
+  INDEX `idx_vencimento` (`data_vencimento` ASC) VISIBLE,
+  INDEX `usuario_id` (`usuario_id` ASC) VISIBLE,
+  CONSTRAINT `pagamentos_locacao_ibfk_1`
+    FOREIGN KEY (`contrato_id`)
+    REFERENCES `ints_db`.`contratos_locacao` (`id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `pagamentos_locacao_ibfk_2`
+    FOREIGN KEY (`usuario_id`)
+    REFERENCES `ints_db`.`usuarios` (`id`))
+ENGINE = InnoDB
+DEFAULT CHARACTER SET = utf8mb4
+COMMENT = 'Controle de pagamentos mensais de locação';
+
+
+-- -----------------------------------------------------
+-- Table `ints_db`.`patrimonio_manutencoes`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`patrimonio_manutencoes` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `patrimonio_id` INT(11) NOT NULL,
+  `tipo_manutencao` ENUM('preventiva', 'corretiva', 'revisao', 'limpeza', 'outro') NOT NULL,
+  `descricao` TEXT NOT NULL,
+  `data_manutencao` DATE NOT NULL,
+  `custo` DECIMAL(12,2) NULL DEFAULT NULL,
+  `responsavel` VARCHAR(150) NULL DEFAULT NULL COMMENT 'Empresa ou pessoa que executou',
+  `observacoes` TEXT NULL DEFAULT NULL,
+  `usuario_id` INT(11) NULL DEFAULT NULL,
+  `data_criado` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (`id`),
+  INDEX `idx_patrimonio` (`patrimonio_id` ASC) VISIBLE,
+  INDEX `idx_data` (`data_manutencao` ASC) VISIBLE,
+  INDEX `idx_tipo` (`tipo_manutencao` ASC) VISIBLE,
+  INDEX `usuario_id` (`usuario_id` ASC) VISIBLE,
+  CONSTRAINT `patrimonio_manutencoes_ibfk_1`
+    FOREIGN KEY (`patrimonio_id`)
+    REFERENCES `ints_db`.`patrimonios` (`id`)
+    ON DELETE CASCADE,
+  CONSTRAINT `patrimonio_manutencoes_ibfk_2`
+    FOREIGN KEY (`usuario_id`)
+    REFERENCES `ints_db`.`usuarios` (`id`))
+ENGINE = InnoDB
+DEFAULT CHARACTER SET = utf8mb4
+COMMENT = 'Histórico de manutenções dos patrimônios';
+
+
+-- -----------------------------------------------------
 -- Table `ints_db`.`produto_relacionamento`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `ints_db`.`produto_relacionamento` (
@@ -576,6 +765,16 @@ USE `ints_db` ;
 CREATE TABLE IF NOT EXISTS `ints_db`.`vw_patrimonio_detalhado` (`patrimonio_id` INT, `produto_nome` INT, `categoria` INT, `numero_patrimonio` INT, `status` INT, `local_nome` INT, `marca` INT, `modelo` INT, `voltagem` INT);
 
 -- -----------------------------------------------------
+-- Placeholder table for view `ints_db`.`vw_patrimonios_completo`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`vw_patrimonios_completo` (`patrimonio_id` INT, `numero_patrimonio` INT, `numero_serie` INT, `status` INT, `data_aquisicao` INT, `valor_aquisicao` INT, `vida_util_meses` INT, `fornecedor` INT, `nota_fiscal` INT, `garantia_meses` INT, `data_fim_garantia` INT, `observacoes` INT, `produto_id` INT, `produto_nome` INT, `categoria_nome` INT, `local_id` INT, `local_nome` INT, `situacao_garantia` INT, `total_manutencoes` INT, `ultima_manutencao` INT);
+
+-- -----------------------------------------------------
+-- Placeholder table for view `ints_db`.`vw_produtos_locados`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ints_db`.`vw_produtos_locados` (`produto_id` INT, `produto_nome` INT, `numero_patrimonio` INT, `status_produto` INT, `contrato_id` INT, `numero_contrato` INT, `contrato_status` INT, `data_inicio` INT, `data_fim` INT, `valor_mensal` INT, `locador_id` INT, `locador_nome` INT, `cnpj` INT, `locador_telefone` INT, `locador_email` INT, `dias_para_vencimento` INT, `situacao_contrato` INT);
+
+-- -----------------------------------------------------
 -- function gerar_numero_patrimonio
 -- -----------------------------------------------------
 
@@ -602,6 +801,48 @@ BEGIN
     );
     
     RETURN novo_codigo;
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure sp_gerar_alertas_locacao
+-- -----------------------------------------------------
+
+DELIMITER $$
+USE `ints_db`$$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_gerar_alertas_locacao`()
+BEGIN
+    -- Limpar alertas antigos não visualizados (mais de 90 dias)
+    DELETE FROM alertas_locacao 
+    WHERE visualizado = 0 AND data_criado < DATE_SUB(CURDATE(), INTERVAL 90 DAY);
+    
+    -- Alertar contratos vencendo em 30 dias
+    INSERT INTO alertas_locacao (contrato_id, tipo_alerta, mensagem, data_alerta)
+    SELECT 
+        c.id,
+        'vencimento_proximo',
+        CONCAT('Contrato ', c.numero_contrato, ' vence em ', DATEDIFF(c.data_fim, CURDATE()), ' dias'),
+        CURDATE()
+    FROM contratos_locacao c
+    WHERE c.status = 'ativo'
+      AND c.data_fim IS NOT NULL
+      AND DATEDIFF(c.data_fim, CURDATE()) <= 30
+      AND DATEDIFF(c.data_fim, CURDATE()) > 0
+      AND NOT EXISTS (
+          SELECT 1 FROM alertas_locacao a 
+          WHERE a.contrato_id = c.id 
+            AND a.tipo_alerta = 'vencimento_proximo'
+            AND a.data_alerta >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+      );
+    
+    -- Alertar contratos vencidos
+    UPDATE contratos_locacao 
+    SET status = 'vencido'
+    WHERE status = 'ativo' 
+      AND data_fim IS NOT NULL 
+      AND data_fim < CURDATE();
+    
 END$$
 
 DELIMITER ;
@@ -644,6 +885,20 @@ DELIMITER ;
 DROP TABLE IF EXISTS `ints_db`.`vw_patrimonio_detalhado`;
 USE `ints_db`;
 CREATE  OR REPLACE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `ints_db`.`vw_patrimonio_detalhado` AS select `p`.`id` AS `patrimonio_id`,`prod`.`nome` AS `produto_nome`,`cat`.`nome` AS `categoria`,`p`.`numero_patrimonio` AS `numero_patrimonio`,`p`.`status` AS `status`,`l`.`nome` AS `local_nome`,max(case when `ad`.`nome` = 'Marca' then `av`.`valor_texto` end) AS `marca`,max(case when `ad`.`nome` = 'Modelo' then `av`.`valor_texto` end) AS `modelo`,max(case when `ad`.`nome` = 'Voltagem' then `av`.`valor_texto` end) AS `voltagem` from (((((`ints_db`.`patrimonios` `p` join `ints_db`.`produtos` `prod` on(`p`.`produto_id` = `prod`.`id`)) join `ints_db`.`categorias` `cat` on(`prod`.`categoria_id` = `cat`.`id`)) join `ints_db`.`locais` `l` on(`p`.`local_id` = `l`.`id`)) left join `ints_db`.`atributos_valor` `av` on(`prod`.`id` = `av`.`produto_id`)) left join `ints_db`.`atributos_definicao` `ad` on(`av`.`atributo_id` = `ad`.`id`)) group by `p`.`id`;
+
+-- -----------------------------------------------------
+-- View `ints_db`.`vw_patrimonios_completo`
+-- -----------------------------------------------------
+DROP TABLE IF EXISTS `ints_db`.`vw_patrimonios_completo`;
+USE `ints_db`;
+CREATE  OR REPLACE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `ints_db`.`vw_patrimonios_completo` AS select `pt`.`id` AS `patrimonio_id`,`pt`.`numero_patrimonio` AS `numero_patrimonio`,`pt`.`numero_serie` AS `numero_serie`,`pt`.`status` AS `status`,`pt`.`data_aquisicao` AS `data_aquisicao`,`pt`.`valor_aquisicao` AS `valor_aquisicao`,`pt`.`vida_util_meses` AS `vida_util_meses`,`pt`.`fornecedor` AS `fornecedor`,`pt`.`nota_fiscal` AS `nota_fiscal`,`pt`.`garantia_meses` AS `garantia_meses`,`pt`.`data_fim_garantia` AS `data_fim_garantia`,`pt`.`observacoes` AS `observacoes`,`p`.`id` AS `produto_id`,`p`.`nome` AS `produto_nome`,`c`.`nome` AS `categoria_nome`,`l`.`id` AS `local_id`,`l`.`nome` AS `local_nome`,case when `pt`.`data_fim_garantia` is not null and `pt`.`data_fim_garantia` < curdate() then 'GARANTIA_VENCIDA' when `pt`.`data_fim_garantia` is not null and to_days(`pt`.`data_fim_garantia`) - to_days(curdate()) <= 60 then 'GARANTIA_VENCENDO' when `pt`.`data_fim_garantia` is not null then 'EM_GARANTIA' else 'SEM_GARANTIA' end AS `situacao_garantia`,(select count(0) from `ints_db`.`patrimonio_manutencoes` `pm` where `pm`.`patrimonio_id` = `pt`.`id`) AS `total_manutencoes`,(select max(`pm2`.`data_manutencao`) from `ints_db`.`patrimonio_manutencoes` `pm2` where `pm2`.`patrimonio_id` = `pt`.`id`) AS `ultima_manutencao` from (((`ints_db`.`patrimonios` `pt` join `ints_db`.`produtos` `p` on(`pt`.`produto_id` = `p`.`id`)) left join `ints_db`.`categorias` `c` on(`p`.`categoria_id` = `c`.`id`)) left join `ints_db`.`locais` `l` on(`pt`.`local_id` = `l`.`id`));
+
+-- -----------------------------------------------------
+-- View `ints_db`.`vw_produtos_locados`
+-- -----------------------------------------------------
+DROP TABLE IF EXISTS `ints_db`.`vw_produtos_locados`;
+USE `ints_db`;
+CREATE  OR REPLACE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `ints_db`.`vw_produtos_locados` AS select `p`.`id` AS `produto_id`,`p`.`nome` AS `produto_nome`,`p`.`numero_patrimonio` AS `numero_patrimonio`,`p`.`status_produto` AS `status_produto`,`c`.`id` AS `contrato_id`,`c`.`numero_contrato` AS `numero_contrato`,`c`.`status` AS `contrato_status`,`c`.`data_inicio` AS `data_inicio`,`c`.`data_fim` AS `data_fim`,`c`.`valor_mensal` AS `valor_mensal`,`l`.`id` AS `locador_id`,`l`.`nome` AS `locador_nome`,`l`.`cnpj` AS `cnpj`,`l`.`telefone` AS `locador_telefone`,`l`.`email` AS `locador_email`,to_days(`c`.`data_fim`) - to_days(curdate()) AS `dias_para_vencimento`,case when `c`.`data_fim` < curdate() then 'VENCIDO' when to_days(`c`.`data_fim`) - to_days(curdate()) <= 30 then 'VENCE_EM_BREVE' else 'VIGENTE' end AS `situacao_contrato` from ((`ints_db`.`produtos` `p` join `ints_db`.`contratos_locacao` `c` on(`p`.`contrato_locacao_id` = `c`.`id`)) join `ints_db`.`locadores` `l` on(`c`.`locador_id` = `l`.`id`)) where `p`.`tipo_posse` = 'locado' and `p`.`deletado` = 0;
 USE `ints_db`;
 
 DELIMITER $$
@@ -672,6 +927,32 @@ BEGIN
     
     IF ciclo_detectado = 1 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ciclo detectado na hierarquia de categorias';
+    END IF;
+END$$
+
+USE `ints_db`$$
+CREATE
+DEFINER=`root`@`localhost`
+TRIGGER `ints_db`.`tr_patrimonio_calc_garantia`
+BEFORE INSERT ON `ints_db`.`patrimonios`
+FOR EACH ROW
+BEGIN
+    IF NEW.data_aquisicao IS NOT NULL AND NEW.garantia_meses IS NOT NULL AND NEW.garantia_meses > 0 THEN
+        SET NEW.data_fim_garantia = DATE_ADD(NEW.data_aquisicao, INTERVAL NEW.garantia_meses MONTH);
+    END IF;
+END$$
+
+USE `ints_db`$$
+CREATE
+DEFINER=`root`@`localhost`
+TRIGGER `ints_db`.`tr_patrimonio_update_garantia`
+BEFORE UPDATE ON `ints_db`.`patrimonios`
+FOR EACH ROW
+BEGIN
+    IF NEW.data_aquisicao IS NOT NULL AND NEW.garantia_meses IS NOT NULL AND NEW.garantia_meses > 0 THEN
+        IF NEW.data_aquisicao != OLD.data_aquisicao OR NEW.garantia_meses != OLD.garantia_meses OR NEW.data_fim_garantia IS NULL THEN
+            SET NEW.data_fim_garantia = DATE_ADD(NEW.data_aquisicao, INTERVAL NEW.garantia_meses MONTH);
+        END IF;
     END IF;
 END$$
 

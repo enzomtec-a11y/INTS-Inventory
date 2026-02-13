@@ -44,6 +44,20 @@ $grupos_admin = [
             'cor' => '#17a2b8'
         ],
         [
+            'titulo' => 'Locadores',
+            'desc' => 'Gerenciar locadores',
+            'link' => 'locadores.php',
+            'icone' => '🏢',
+            'cor' => '#a07c30'
+        ],
+        [
+            'titulo' => 'Contratos de Locação',
+            'desc' => 'Verifique e gerencie contratos de locadores no sistema',
+            'link' => 'contratos.php',
+            'icone' => '🏢',
+            'cor' => '#4133bd'
+        ],
+        [
             'titulo' => 'Categorias',
             'desc' => 'Criar e organizar a árvore de categorias.',
             'link' => 'admin_categorias.php',
