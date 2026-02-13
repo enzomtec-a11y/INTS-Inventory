@@ -231,6 +231,51 @@ while ($row = $res_reservas->fetch_assoc()) {
 }
 $stmt->close();
 
+// BUSCAR INFORMAÇÕES DE LOCAÇÃO (se for produto locado)
+$locador_info = null;
+$contrato_info = null;
+$produtos_mesmo_contrato = [];
+$total_produtos_contrato = 0;
+
+if ($produto['tipo_posse'] == 'locado') {
+    // Buscar informações do locador
+    if (!empty($produto['locador_id'])) {
+        $stmt = $conn->prepare("SELECT * FROM locadores WHERE id = ?");
+        $stmt->bind_param("i", $produto['locador_id']);
+        $stmt->execute();
+        $locador_info = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+    }
+    
+    // Buscar informações do contrato
+    if (!empty($produto['contrato_locacao_id'])) {
+        $stmt = $conn->prepare("SELECT * FROM contratos_locacao WHERE id = ?");
+        $stmt->bind_param("i", $produto['contrato_locacao_id']);
+        $stmt->execute();
+        $contrato_info = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        
+        // Contar total de produtos do contrato
+        $stmt = $conn->prepare("SELECT COUNT(*) as total FROM produtos WHERE contrato_locacao_id = ? AND deletado = FALSE");
+        $stmt->bind_param("i", $produto['contrato_locacao_id']);
+        $stmt->execute();
+        $res_total = $stmt->get_result()->fetch_assoc();
+        $total_produtos_contrato = $res_total['total'];
+        $stmt->close();
+        
+        // Buscar outros produtos do mesmo contrato (limitado)
+        $sql_outros = "SELECT id, nome, numero_patrimonio FROM produtos WHERE contrato_locacao_id = ? AND id != ? AND deletado = FALSE ORDER BY nome LIMIT 10";
+        $stmt = $conn->prepare($sql_outros);
+        $stmt->bind_param("ii", $produto['contrato_locacao_id'], $produto_id);
+        $stmt->execute();
+        $res_outros = $stmt->get_result();
+        while ($row = $res_outros->fetch_assoc()) {
+            $produtos_mesmo_contrato[] = $row;
+        }
+        $stmt->close();
+    }
+}
+
 $conn->close();
 ?>
 
@@ -293,6 +338,8 @@ $conn->close();
         .btn-danger:hover { background: #e53e3e; }
         .btn-warning { background: #ed8936; color: white; }
         .btn-warning:hover { background: #dd6b20; }
+        .btn-info { background: #4299e1; color: white; }
+        .btn-info:hover { background: #3182ce; }
         
         /* Tabs de navegação */
         .tabs {
@@ -568,6 +615,29 @@ $conn->close();
             opacity: 0.5;
         }
         
+        /* Cards de locação */
+        .locacao-highlight {
+            background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+            border-left: 5px solid #f39c12;
+        }
+        
+        .info-box {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .info-box-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
         /* Responsividade */
         @media (max-width: 768px) {
             .header-content {
@@ -610,6 +680,9 @@ $conn->close();
     
     <div class="tabs">
         <button class="tab active" onclick="abrirTab('geral')">📋 Informações Gerais</button>
+        <?php if ($produto['tipo_posse'] == 'locado' && ($locador_info || $contrato_info)): ?>
+            <button class="tab" onclick="abrirTab('locacao')">🏢 Locação</button>
+        <?php endif; ?>
         <button class="tab" onclick="abrirTab('estoque')">📦 Estoque & Locais</button>
         <button class="tab" onclick="abrirTab('composicao')">🔧 Composição (BOM)</button>
         <button class="tab" onclick="abrirTab('movimentacoes')">
@@ -683,18 +756,6 @@ $conn->close();
                         ?>
                     </div>
                 </div>
-                <?php if ($produto['tipo_posse'] == 'locado' && !empty($produto['locador_nome'])): ?>
-                <div class="info-item">
-                    <div class="info-label">Locador</div>
-                    <div class="info-value"><?php echo htmlspecialchars($produto['locador_nome']); ?></div>
-                </div>
-                <?php endif; ?>
-                <?php if ($produto['tipo_posse'] == 'locado' && !empty($produto['locacao_contrato'])): ?>
-                <div class="info-item">
-                    <div class="info-label">Contrato de Locação</div>
-                    <div class="info-value"><?php echo htmlspecialchars($produto['locacao_contrato']); ?></div>
-                </div>
-                <?php endif; ?>
                 <div class="info-item">
                     <div class="info-label">Controla Estoque</div>
                     <div class="info-value">
@@ -727,6 +788,272 @@ $conn->close();
         </div>
         <?php endif; ?>
     </div>
+    
+    <!-- TAB: Informações de Locação -->
+    <?php if ($produto['tipo_posse'] == 'locado' && ($locador_info || $contrato_info)): ?>
+    <div id="tab-locacao" class="tab-content">
+        <?php if ($locador_info): ?>
+        <div class="card locacao-highlight">
+            <h2 class="card-title">🏢 Informações do Locador</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Nome / Nome Fantasia</div>
+                    <div class="info-value"><?php echo htmlspecialchars($locador_info['nome']); ?></div>
+                </div>
+                
+                <?php if ($locador_info['razao_social']): ?>
+                <div class="info-item">
+                    <div class="info-label">Razão Social</div>
+                    <div class="info-value"><?php echo htmlspecialchars($locador_info['razao_social']); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <div class="info-item">
+                    <div class="info-label">Tipo de Pessoa</div>
+                    <div class="info-value">
+                        <span class="badge badge-info">
+                            <?php echo $locador_info['tipo_pessoa'] == 'juridica' ? 'Pessoa Jurídica' : 'Pessoa Física'; ?>
+                        </span>
+                    </div>
+                </div>
+                
+                <?php if ($locador_info['cnpj']): ?>
+                <div class="info-item">
+                    <div class="info-label">CNPJ</div>
+                    <div class="info-value"><?php echo htmlspecialchars($locador_info['cnpj']); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($locador_info['cpf']): ?>
+                <div class="info-item">
+                    <div class="info-label">CPF</div>
+                    <div class="info-value"><?php echo htmlspecialchars($locador_info['cpf']); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($locador_info['email']): ?>
+                <div class="info-item">
+                    <div class="info-label">E-mail</div>
+                    <div class="info-value">
+                        <a href="mailto:<?php echo htmlspecialchars($locador_info['email']); ?>" style="color: #4299e1;">
+                            <?php echo htmlspecialchars($locador_info['email']); ?>
+                        </a>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($locador_info['telefone']): ?>
+                <div class="info-item">
+                    <div class="info-label">Telefone</div>
+                    <div class="info-value"><?php echo htmlspecialchars($locador_info['telefone']); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($locador_info['celular']): ?>
+                <div class="info-item">
+                    <div class="info-label">Celular</div>
+                    <div class="info-value"><?php echo htmlspecialchars($locador_info['celular']); ?></div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($locador_info['contato_responsavel']): ?>
+                <div class="info-item">
+                    <div class="info-label">Responsável / Contato</div>
+                    <div class="info-value"><?php echo htmlspecialchars($locador_info['contato_responsavel']); ?></div>
+                </div>
+                <?php endif; ?>
+            </div>
+            
+            <?php if ($locador_info['endereco'] || $locador_info['cidade']): ?>
+            <div style="margin-top: 20px;">
+                <div class="info-box-title">📍 Endereço</div>
+                <div style="padding: 10px; background: #fff; border-radius: 6px;">
+                    <?php if ($locador_info['endereco']): ?>
+                        <?php echo htmlspecialchars($locador_info['endereco']); ?><br>
+                    <?php endif; ?>
+                    <?php if ($locador_info['cidade'] && $locador_info['estado']): ?>
+                        <?php echo htmlspecialchars($locador_info['cidade']); ?> - <?php echo htmlspecialchars($locador_info['estado']); ?>
+                        <?php if ($locador_info['cep']): ?>
+                            | CEP: <?php echo htmlspecialchars($locador_info['cep']); ?>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+            
+            <?php if ($locador_info['observacoes']): ?>
+            <div style="margin-top: 20px;">
+                <div class="info-box-title">📝 Observações</div>
+                <div style="padding: 10px; background: #fff; border-radius: 6px;">
+                    <?php echo nl2br(htmlspecialchars($locador_info['observacoes'])); ?>
+                </div>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+        
+        <?php if ($contrato_info): ?>
+        <div class="card">
+            <h2 class="card-title">📄 Informações do Contrato</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Número do Contrato</div>
+                    <div class="info-value"><?php echo htmlspecialchars($contrato_info['numero_contrato']); ?></div>
+                </div>
+                
+                <div class="info-item">
+                    <div class="info-label">Status do Contrato</div>
+                    <div class="info-value">
+                        <?php
+                        $status_contrato = $contrato_info['status'];
+                        $badge_contrato = 'badge-success';
+                        
+                        switch($status_contrato) {
+                            case 'vencido':
+                                $badge_contrato = 'badge-danger';
+                                break;
+                            case 'cancelado':
+                                $badge_contrato = 'badge-secondary';
+                                break;
+                            case 'suspenso':
+                                $badge_contrato = 'badge-warning';
+                                break;
+                        }
+                        ?>
+                        <span class="badge <?php echo $badge_contrato; ?>"><?php echo ucfirst($status_contrato); ?></span>
+                    </div>
+                </div>
+                
+                <div class="info-item">
+                    <div class="info-label">Data de Início</div>
+                    <div class="info-value"><?php echo date('d/m/Y', strtotime($contrato_info['data_inicio'])); ?></div>
+                </div>
+                
+                <?php if ($contrato_info['data_fim']): ?>
+                <div class="info-item">
+                    <div class="info-label">Data de Término</div>
+                    <div class="info-value">
+                        <?php 
+                        echo date('d/m/Y', strtotime($contrato_info['data_fim']));
+                        $dias_vencimento = floor((strtotime($contrato_info['data_fim']) - time()) / (60 * 60 * 24));
+                        
+                        if ($dias_vencimento < 0) {
+                            echo '<br><small style="color: #e53e3e;">⚠️ Vencido há ' . abs($dias_vencimento) . ' dias</small>';
+                        } elseif ($dias_vencimento <= 30) {
+                            echo '<br><small style="color: #dd6b20;">⚠️ Vence em ' . $dias_vencimento . ' dias</small>';
+                        } else {
+                            echo '<br><small style="color: #48bb78;">✓ Vigente por mais ' . $dias_vencimento . ' dias</small>';
+                        }
+                        ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($contrato_info['valor_mensal']): ?>
+                <div class="info-item">
+                    <div class="info-label">Valor Mensal</div>
+                    <div class="info-value" style="color: #e53e3e;">
+                        R$ <?php echo number_format($contrato_info['valor_mensal'], 2, ',', '.'); ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($contrato_info['valor_total']): ?>
+                <div class="info-item">
+                    <div class="info-label">Valor Total do Contrato</div>
+                    <div class="info-value" style="color: #e53e3e;">
+                        R$ <?php echo number_format($contrato_info['valor_total'], 2, ',', '.'); ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($contrato_info['data_vencimento_pagamento']): ?>
+                <div class="info-item">
+                    <div class="info-label">Dia de Vencimento</div>
+                    <div class="info-value">Dia <?php echo $contrato_info['data_vencimento_pagamento']; ?> de cada mês</div>
+                </div>
+                <?php endif; ?>
+                
+                <div class="info-item">
+                    <div class="info-label">Renovação Automática</div>
+                    <div class="info-value">
+                        <?php echo $contrato_info['renovacao_automatica'] ? 
+                            '<span class="badge badge-success">Sim</span>' : 
+                            '<span class="badge badge-secondary">Não</span>'; 
+                        ?>
+                    </div>
+                </div>
+                
+                <div class="info-item">
+                    <div class="info-label">Total de Produtos</div>
+                    <div class="info-value">
+                        <strong><?php echo $total_produtos_contrato; ?></strong> 
+                        <?php echo $total_produtos_contrato == 1 ? 'produto' : 'produtos'; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <?php if ($contrato_info['descricao']): ?>
+            <div style="margin-top: 20px;">
+                <div class="info-box-title">📋 Descrição do Contrato</div>
+                <div style="padding: 10px; background: #f7fafc; border-radius: 6px;">
+                    <?php echo nl2br(htmlspecialchars($contrato_info['descricao'])); ?>
+                </div>
+            </div>
+            <?php endif; ?>
+            
+            <?php if ($contrato_info['observacoes']): ?>
+            <div style="margin-top: 20px;">
+                <div class="info-box-title">📝 Observações do Contrato</div>
+                <div style="padding: 10px; background: #f7fafc; border-radius: 6px;">
+                    <?php echo nl2br(htmlspecialchars($contrato_info['observacoes'])); ?>
+                </div>
+            </div>
+            <?php endif; ?>
+            
+            <?php if (!empty($produtos_mesmo_contrato)): ?>
+            <div style="margin-top: 20px;">
+                <div class="info-box-title">📦 Outros Produtos deste Contrato</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>Patrimônio</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($produtos_mesmo_contrato as $prod_outro): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars($prod_outro['nome']); ?></td>
+                            <td>
+                                <?php echo $prod_outro['numero_patrimonio'] ? 
+                                    htmlspecialchars($prod_outro['numero_patrimonio']) : 
+                                    '<span style="color: #a0aec0;">—</span>'; 
+                                ?>
+                            </td>
+                            <td>
+                                <a href="detalhes.php?id=<?php echo $prod_outro['id']; ?>" class="btn btn-info" style="padding: 5px 10px; font-size: 0.85em;">
+                                    Ver Detalhes
+                                </a>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php if ($total_produtos_contrato > count($produtos_mesmo_contrato)): ?>
+                    <div style="text-align: center; margin-top: 15px;">
+                        <a href="index.php?contrato_id=<?php echo $contrato_info['id']; ?>" class="btn btn-info">
+                            Ver todos os <?php echo $total_produtos_contrato; ?> produtos deste contrato
+                        </a>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
     
     <!-- TAB: Estoque & Locais -->
     <div id="tab-estoque" class="tab-content">
