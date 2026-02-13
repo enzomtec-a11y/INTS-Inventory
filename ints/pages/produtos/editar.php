@@ -80,6 +80,11 @@ if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
 }
 while ($r = $res_prod->fetch_assoc()) $produtos_lista[] = $r;
 
+// Buscar Locadores Ativos
+$locadores = [];
+$res_loc = $conn->query("SELECT id, nome, razao_social FROM locadores WHERE ativo = 1 ORDER BY nome");
+if ($res_loc) while ($r = $res_loc->fetch_assoc()) $locadores[] = $r;
+
 // --- 3. LÓGICA DE ATUALIZAÇÃO (POST) ---
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $nome = trim($_POST['nome_produto'] ?? '');
@@ -90,8 +95,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $controla_estoque = isset($_POST['controla_estoque_proprio']) ? (int)$_POST['controla_estoque_proprio'] : 1;
     
     $tipo_posse = $_POST['tipo_posse'] ?? 'proprio';
-    $locador_nome = trim($_POST['locador_nome'] ?? '');
-    $locacao_contrato = trim($_POST['locacao_contrato'] ?? '');
+    
+    // Campos de locação com integração
+    $locador_id = null;
+    $contrato_id = null;
+    if ($tipo_posse == 'locado') {
+        $locador_id = !empty($_POST['locador_id']) ? (int)$_POST['locador_id'] : null;
+        $contrato_id = !empty($_POST['contrato_id']) ? (int)$_POST['contrato_id'] : null;
+    }
 
     // Patrimônio Manual
     $tem_patrimonio = isset($_POST['tem_patrimonio']);
@@ -102,8 +113,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     if (empty($nome) || $categoria_id <= 0) {
         $status_message = "<p style='color: red;'>Nome e Categoria são obrigatórios.</p>";
-    } elseif ($tipo_posse == 'locado' && (empty($locador_nome) || empty($locacao_contrato))) {
-        $status_message = "<p style='color:red'>Para produtos locados, locador e contrato são obrigatórios.</p>";
+    } elseif ($tipo_posse == 'locado' && (!$locador_id || !$contrato_id)) {
+        $status_message = "<p style='color:red'>Para produtos locados, selecione o locador e o contrato.</p>";
     } elseif ($tem_patrimonio && empty($numero_patrimonio)) {
         $status_message = "<p style='color:red'>Se possui patrimônio, o número é obrigatório.</p>";
     } else {
@@ -138,10 +149,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if (empty($status_message)) {
             $conn->begin_transaction();
             try {
-                $sql_up = "UPDATE produtos SET nome=?, descricao=?, categoria_id=?, controla_estoque_proprio=?, tipo_posse=?, locador_nome=?, locacao_contrato=?, numero_patrimonio=?, data_atualizado=NOW() WHERE id=?";
+                $sql_up = "UPDATE produtos SET nome=?, descricao=?, categoria_id=?, controla_estoque_proprio=?, tipo_posse=?, locador_id=?, contrato_locacao_id=?, numero_patrimonio=?, data_atualizado=NOW() WHERE id=?";
                 $stmt = $conn->prepare($sql_up);
-                // s, s, i, i, s, s, s, s, i
-                $stmt->bind_param("ssiissssi", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_nome, $locacao_contrato, $numero_patrimonio, $produto_id);
+                // s, s, i, i, s, i, i, s, i
+                $stmt->bind_param("ssiisiisi", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_id, $contrato_id, $numero_patrimonio, $produto_id);
                 $stmt->execute();
                 $stmt->close();
 
@@ -262,6 +273,24 @@ function getCaminhoCategoria($conn, $categoria_id) {
 }
 $caminho_categoria = getCaminhoCategoria($conn, $produto_data['categoria_id']);
 $caminho_categoria_json = json_encode($caminho_categoria);
+
+// Buscar informações do locador/contrato atual se existir
+$locador_atual = null;
+$contrato_atual = null;
+if ($produto_data['locador_id']) {
+    $stmt = $conn->prepare("SELECT id, nome, razao_social FROM locadores WHERE id = ?");
+    $stmt->bind_param("i", $produto_data['locador_id']);
+    $stmt->execute();
+    $locador_atual = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+}
+if ($produto_data['contrato_locacao_id']) {
+    $stmt = $conn->prepare("SELECT * FROM contratos_locacao WHERE id = ?");
+    $stmt->bind_param("i", $produto_data['contrato_locacao_id']);
+    $stmt->execute();
+    $contrato_atual = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+}
 ?>
 
 <!DOCTYPE html>
@@ -286,6 +315,8 @@ $caminho_categoria_json = json_encode($caminho_categoria);
         
         #locacao-container, #patrimonio-container { background: #fff3cd; padding: 15px; border: 1px solid #ffeeba; border-radius: 4px; margin-bottom: 15px; }
         #patrimonio-container { background: #e3f2fd; border-color: #bbdefb; }
+        
+        .info-badge { background: #e3f2fd; color: #1976d2; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; margin-top: 5px; display: inline-block; }
     </style>
 </head>
 <body>
@@ -330,12 +361,32 @@ $caminho_categoria_json = json_encode($caminho_categoria);
 
             <div id="locacao-container" style="display: none;">
                 <div class="form-group">
-                    <label>Nome do Locador <span class="required-star">*</span></label>
-                    <input type="text" name="locador_nome" id="locador_nome" value="<?php echo htmlspecialchars($produto_data['locador_nome'] ?? ''); ?>">
+                    <label>Locador / Empresa <span class="required-star">*</span></label>
+                    <select name="locador_id" id="locador_id" onchange="carregarContratos()">
+                        <option value="">Selecione o locador...</option>
+                        <?php foreach ($locadores as $loc): ?>
+                            <option value="<?php echo $loc['id']; ?>" <?php echo ($produto_data['locador_id'] == $loc['id']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($loc['nome']); ?>
+                                <?php if ($loc['razao_social']): ?>
+                                    - <?php echo htmlspecialchars($loc['razao_social']); ?>
+                                <?php endif; ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small style="color: #666;">
+                        <a href="../admin/locadores.php" target="_blank" style="color: #1976d2;">+ Cadastrar novo locador</a>
+                    </small>
                 </div>
+                
                 <div class="form-group">
                     <label>Contrato de Locação <span class="required-star">*</span></label>
-                    <input type="text" name="locacao_contrato" id="locacao_contrato" value="<?php echo htmlspecialchars($produto_data['locacao_contrato'] ?? ''); ?>">
+                    <select name="contrato_id" id="contrato_id">
+                        <option value="">Carregando...</option>
+                    </select>
+                    <div id="contrato-info" style="margin-top: 8px;"></div>
+                    <small style="color: #666;">
+                        <a href="../admin/contratos.php" target="_blank" style="color: #1976d2;">+ Cadastrar novo contrato</a>
+                    </small>
                 </div>
             </div>
 
@@ -396,6 +447,8 @@ $caminho_categoria_json = json_encode($caminho_categoria);
     <script>
         const prods = <?php echo $produtos_lista_json; ?>;
         const caminhoCategoria = <?php echo $caminho_categoria_json; ?>;
+        const locadorAtualId = <?php echo $produto_data['locador_id'] ?? 'null'; ?>;
+        const contratoAtualId = <?php echo $produto_data['contrato_locacao_id'] ?? 'null'; ?>;
         
         const ckKit = document.getElementById('is_kit');
         const areaKit = document.getElementById('area-kit');
@@ -405,13 +458,22 @@ $caminho_categoria_json = json_encode($caminho_categoria);
         function toggleLocadorField() {
             const tipo = document.getElementById('tipo_posse').value;
             const container = document.getElementById('locacao-container');
-            const inputs = container.querySelectorAll('input');
+            const locadorSelect = document.getElementById('locador_id');
+            const contratoSelect = document.getElementById('contrato_id');
+            
             if (tipo === 'locado') {
                 container.style.display = 'block';
-                inputs.forEach(i => i.required = true);
+                locadorSelect.required = true;
+                contratoSelect.required = true;
+                
+                // Se tem locador atual, carregar contratos
+                if (locadorAtualId) {
+                    carregarContratos();
+                }
             } else {
                 container.style.display = 'none';
-                inputs.forEach(i => { i.required = false; i.value = ''; });
+                locadorSelect.required = false;
+                contratoSelect.required = false;
             }
         }
 
@@ -427,6 +489,97 @@ $caminho_categoria_json = json_encode($caminho_categoria);
                 input.required = false;
                 input.value = '';
             }
+        }
+
+        async function carregarContratos() {
+            const locadorId = document.getElementById('locador_id').value;
+            const contratoSelect = document.getElementById('contrato_id');
+            const contratoInfo = document.getElementById('contrato-info');
+            
+            contratoSelect.innerHTML = '<option value="">Carregando contratos...</option>';
+            contratoSelect.disabled = true;
+            contratoInfo.innerHTML = '';
+            
+            if (!locadorId) {
+                contratoSelect.innerHTML = '<option value="">Primeiro selecione um locador...</option>';
+                return;
+            }
+            
+            try {
+                const response = await fetch(`../../api/contratos.php?locador_id=${locadorId}`);
+                const data = await response.json();
+                
+                if (data.sucesso && data.contratos && data.contratos.length > 0) {
+                    contratoSelect.innerHTML = '<option value="">Selecione o contrato...</option>';
+                    
+                    data.contratos.forEach(contrato => {
+                        const option = document.createElement('option');
+                        option.value = contrato.id;
+                        
+                        let texto = contrato.numero_contrato;
+                        if (contrato.descricao) {
+                            texto += ' - ' + contrato.descricao.substring(0, 50);
+                            if (contrato.descricao.length > 50) texto += '...';
+                        }
+                        
+                        option.textContent = texto;
+                        option.dataset.dataInicio = contrato.data_inicio;
+                        option.dataset.dataFim = contrato.data_fim;
+                        option.dataset.valorMensal = contrato.valor_mensal;
+                        
+                        // Selecionar o contrato atual se existir
+                        if (contratoAtualId && contrato.id == contratoAtualId) {
+                            option.selected = true;
+                        }
+                        
+                        contratoSelect.appendChild(option);
+                    });
+                    
+                    contratoSelect.disabled = false;
+                    
+                    // Mostrar info do contrato selecionado
+                    if (contratoAtualId) {
+                        const event = new Event('change');
+                        contratoSelect.dispatchEvent(event);
+                    }
+                    
+                    contratoSelect.addEventListener('change', function() {
+                        const selected = this.options[this.selectedIndex];
+                        if (selected.value) {
+                            let info = '<div class="info-badge">';
+                            info += '<strong>📄 Vigência:</strong> ' + formatarData(selected.dataset.dataInicio);
+                            if (selected.dataset.dataFim) {
+                                info += ' até ' + formatarData(selected.dataset.dataFim);
+                            } else {
+                                info += ' (indeterminado)';
+                            }
+                            if (selected.dataset.valorMensal && selected.dataset.valorMensal !== 'null') {
+                                info += ' | <strong>💰 Valor:</strong> R$ ' + parseFloat(selected.dataset.valorMensal).toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                            }
+                            info += '</div>';
+                            contratoInfo.innerHTML = info;
+                        } else {
+                            contratoInfo.innerHTML = '';
+                        }
+                    });
+                    
+                } else {
+                    contratoSelect.innerHTML = '<option value="">Nenhum contrato ativo encontrado</option>';
+                    contratoInfo.innerHTML = '<small style="color: #f56565;">⚠️ Este locador não possui contratos ativos. <a href="../admin/contratos.php" target="_blank" style="color: #1976d2;">Cadastre um contrato</a></small>';
+                }
+            } catch (error) {
+                console.error('Erro ao carregar contratos:', error);
+                contratoSelect.innerHTML = '<option value="">Erro ao carregar contratos</option>';
+            }
+        }
+        
+        function formatarData(dataStr) {
+            if (!dataStr) return '';
+            const partes = dataStr.split('-');
+            if (partes.length === 3) {
+                return `${partes[2]}/${partes[1]}/${partes[0]}`;
+            }
+            return dataStr;
         }
 
         function toggleKit() {

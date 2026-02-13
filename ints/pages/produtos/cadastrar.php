@@ -47,6 +47,11 @@ if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
     if ($res) while ($r = $res->fetch_assoc()) $produtos_lista[] = $r;
 }
 
+// Buscar Locadores Ativos
+$locadores = [];
+$res_loc = $conn->query("SELECT id, nome, razao_social FROM locadores WHERE ativo = 1 ORDER BY nome");
+if ($res_loc) while ($r = $res_loc->fetch_assoc()) $locadores[] = $r;
+
 // --- FUNÇÕES AUXILIARES ---
 function get_eav_params_insert($valor, $tipo) {
     if ($tipo !== 'booleano' && ($valor === '' || $valor === null)) return null;
@@ -99,8 +104,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     
     $local_id = (int)($_POST['local_id'] ?? 0);
     $tipo_posse = $_POST['tipo_posse'] ?? 'proprio';
-    $locador_nome = trim($_POST['locador_nome'] ?? '');
-    $locacao_contrato = trim($_POST['locacao_contrato'] ?? '');
+    
+    // Campos de locação com integração
+    $locador_id = null;
+    $contrato_id = null;
+    if ($tipo_posse == 'locado') {
+        $locador_id = !empty($_POST['locador_id']) ? (int)$_POST['locador_id'] : null;
+        $contrato_id = !empty($_POST['contrato_id']) ? (int)$_POST['contrato_id'] : null;
+    }
     
     // Tratamento do Patrimônio Manual
     $tem_patrimonio = isset($_POST['tem_patrimonio']);
@@ -124,8 +135,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // VALIDAÇÕES
     if (empty($nome) || $categoria_id <= 0) {
         $status_message = "<div class='alert error'>Nome e Categoria são obrigatórios.</div>";
-    } elseif ($tipo_posse == 'locado' && (empty($locador_nome) || empty($locacao_contrato))) {
-        $status_message = "<div class='alert error'>Para produtos locados, o nome do locador e o contrato são obrigatórios.</div>";
+    } elseif ($tipo_posse == 'locado' && (!$locador_id || !$contrato_id)) {
+        $status_message = "<div class='alert error'>Para produtos locados, selecione o locador e o contrato.</div>";
     } elseif ($tem_patrimonio && empty($numero_patrimonio)) {
         $status_message = "<div class='alert error'>Se o item possui patrimônio, o número é obrigatório.</div>";
     } else {
@@ -150,13 +161,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $conn->begin_transaction();
                 try {
                     // 1. Inserir Produto
-                    // ATENÇÃO: A ordem no SQL abaixo é: locador, contrato, patrimonio
-                    $sql = "INSERT INTO produtos (nome, descricao, categoria_id, controla_estoque_proprio, tipo_posse, locador_nome, locacao_contrato, numero_patrimonio, data_criado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                    $sql = "INSERT INTO produtos (nome, descricao, categoria_id, controla_estoque_proprio, tipo_posse, locador_id, contrato_locacao_id, numero_patrimonio, data_criado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
                     $stmt = $conn->prepare($sql);
                     
-                    // Tipos: s(nome), s(desc), i(cat), i(ctrl), s(tipo), s(locador), s(contrato), s(patrimonio)
-                    // A ordem das variáveis deve bater EXATAMENTE com a ordem dos campos no INSERT acima
-                    $stmt->bind_param("ssiissss", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_nome, $locacao_contrato, $numero_patrimonio);
+                    // Tipos: s(nome), s(desc), i(cat), i(ctrl), s(tipo), i(locador_id), i(contrato_id), s(patrimonio)
+                    $stmt->bind_param("ssiisiis", $nome, $descricao, $categoria_id, $controla_estoque, $tipo_posse, $locador_id, $contrato_id, $numero_patrimonio);
                     
                     $stmt->execute();
                     $produto_id = $stmt->insert_id;
@@ -282,6 +291,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         /* Containers opcionais */
         #locacao-container, #patrimonio-container { background: #fff3cd; padding: 15px; border: 1px solid #ffeeba; border-radius: 4px; margin-bottom: 15px; }
         #patrimonio-container { background: #e3f2fd; border-color: #bbdefb; }
+        
+        .info-badge { background: #e3f2fd; color: #1976d2; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; margin-top: 5px; display: inline-block; }
+        .loading-indicator { color: #666; font-style: italic; padding: 5px; }
     </style>
 </head>
 <body>
@@ -324,12 +336,32 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             <div id="locacao-container" style="display: none;">
                 <div class="form-group">
-                    <label>Nome do Locador / Empresa <span class="required-star">*</span></label>
-                    <input type="text" name="locador_nome" id="locador_nome">
+                    <label>Locador / Empresa <span class="required-star">*</span></label>
+                    <select name="locador_id" id="locador_id" onchange="carregarContratos()">
+                        <option value="">Selecione o locador...</option>
+                        <?php foreach ($locadores as $loc): ?>
+                            <option value="<?php echo $loc['id']; ?>">
+                                <?php echo htmlspecialchars($loc['nome']); ?>
+                                <?php if ($loc['razao_social']): ?>
+                                    - <?php echo htmlspecialchars($loc['razao_social']); ?>
+                                <?php endif; ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small style="color: #666;">
+                        <a href="../admin/locadores.php" target="_blank" style="color: #1976d2;">+ Cadastrar novo locador</a>
+                    </small>
                 </div>
+                
                 <div class="form-group">
-                    <label>Número do Contrato de Locação <span class="required-star">*</span></label>
-                    <input type="text" name="locacao_contrato" id="locacao_contrato" placeholder="Ex: CTR-2023-001">
+                    <label>Contrato de Locação <span class="required-star">*</span></label>
+                    <select name="contrato_id" id="contrato_id" disabled>
+                        <option value="">Primeiro selecione um locador...</option>
+                    </select>
+                    <div id="contrato-info" style="margin-top: 8px;"></div>
+                    <small style="color: #666;">
+                        <a href="../admin/contratos.php" target="_blank" style="color: #1976d2;">+ Cadastrar novo contrato</a>
+                    </small>
                 </div>
             </div>
 
@@ -402,14 +434,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         function toggleLocadorField() {
             const tipoPosse = document.getElementById('tipo_posse').value;
             const container = document.getElementById('locacao-container');
-            const fields = container.querySelectorAll('input');
+            const locadorSelect = document.getElementById('locador_id');
+            const contratoSelect = document.getElementById('contrato_id');
             
             if (tipoPosse === 'locado') {
                 container.style.display = 'block';
-                fields.forEach(f => f.required = true);
+                locadorSelect.required = true;
+                contratoSelect.required = true;
             } else {
                 container.style.display = 'none';
-                fields.forEach(f => { f.required = false; f.value = ''; });
+                locadorSelect.required = false;
+                contratoSelect.required = false;
+                locadorSelect.value = '';
+                contratoSelect.value = '';
+                contratoSelect.disabled = true;
+                contratoSelect.innerHTML = '<option value="">Primeiro selecione um locador...</option>';
+                document.getElementById('contrato-info').innerHTML = '';
             }
         }
 
@@ -426,6 +466,89 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 input.required = false;
                 input.value = '';
             }
+        }
+
+        async function carregarContratos() {
+            const locadorId = document.getElementById('locador_id').value;
+            const contratoSelect = document.getElementById('contrato_id');
+            const contratoInfo = document.getElementById('contrato-info');
+            
+            // Resetar
+            contratoSelect.innerHTML = '<option value="">Carregando contratos...</option>';
+            contratoSelect.disabled = true;
+            contratoInfo.innerHTML = '';
+            
+            if (!locadorId) {
+                contratoSelect.innerHTML = '<option value="">Primeiro selecione um locador...</option>';
+                return;
+            }
+            
+            try {
+                const response = await fetch(`../../api/contratos.php?locador_id=${locadorId}`);
+                const data = await response.json();
+                
+                if (data.sucesso && data.contratos && data.contratos.length > 0) {
+                    contratoSelect.innerHTML = '<option value="">Selecione o contrato...</option>';
+                    
+                    data.contratos.forEach(contrato => {
+                        const option = document.createElement('option');
+                        option.value = contrato.id;
+                        
+                        let texto = contrato.numero_contrato;
+                        if (contrato.descricao) {
+                            texto += ' - ' + contrato.descricao.substring(0, 50);
+                            if (contrato.descricao.length > 50) texto += '...';
+                        }
+                        
+                        option.textContent = texto;
+                        option.dataset.dataInicio = contrato.data_inicio;
+                        option.dataset.dataFim = contrato.data_fim;
+                        option.dataset.valorMensal = contrato.valor_mensal;
+                        
+                        contratoSelect.appendChild(option);
+                    });
+                    
+                    contratoSelect.disabled = false;
+                    
+                    // Adicionar evento para mostrar informações do contrato
+                    contratoSelect.addEventListener('change', function() {
+                        const selected = this.options[this.selectedIndex];
+                        if (selected.value) {
+                            let info = '<div class="info-badge">';
+                            info += '<strong>📄 Vigência:</strong> ' + formatarData(selected.dataset.dataInicio);
+                            if (selected.dataset.dataFim) {
+                                info += ' até ' + formatarData(selected.dataset.dataFim);
+                            } else {
+                                info += ' (indeterminado)';
+                            }
+                            if (selected.dataset.valorMensal && selected.dataset.valorMensal !== 'null') {
+                                info += ' | <strong>💰 Valor:</strong> R$ ' + parseFloat(selected.dataset.valorMensal).toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                            }
+                            info += '</div>';
+                            contratoInfo.innerHTML = info;
+                        } else {
+                            contratoInfo.innerHTML = '';
+                        }
+                    });
+                    
+                } else {
+                    contratoSelect.innerHTML = '<option value="">Nenhum contrato ativo encontrado</option>';
+                    contratoInfo.innerHTML = '<small style="color: #f56565;">⚠️ Este locador não possui contratos ativos. <a href="../admin/contratos.php" target="_blank" style="color: #1976d2;">Cadastre um contrato</a></small>';
+                }
+            } catch (error) {
+                console.error('Erro ao carregar contratos:', error);
+                contratoSelect.innerHTML = '<option value="">Erro ao carregar contratos</option>';
+                contratoInfo.innerHTML = '<small style="color: #f56565;">⚠️ Erro ao buscar contratos. Tente novamente.</small>';
+            }
+        }
+        
+        function formatarData(dataStr) {
+            if (!dataStr) return '';
+            const partes = dataStr.split('-');
+            if (partes.length === 3) {
+                return `${partes[2]}/${partes[1]}/${partes[0]}`;
+            }
+            return dataStr;
         }
 
         document.addEventListener('DOMContentLoaded', function() {
