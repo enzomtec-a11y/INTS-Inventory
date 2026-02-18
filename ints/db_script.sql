@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`contratos_locacao` (
   INDEX `idx_datas` (`data_inicio` ASC, `data_fim` ASC) VISIBLE,
   INDEX `criado_por` (`criado_por` ASC) VISIBLE,
   INDEX `idx_contratos_status_datas` (`status` ASC, `data_inicio` ASC, `data_fim` ASC) VISIBLE,
+  INDEX `idx_contratos_locador` (`locador_id` ASC) VISIBLE,
+  INDEX `idx_contratos_status` (`status` ASC) VISIBLE,
   CONSTRAINT `contratos_locacao_ibfk_1`
     FOREIGN KEY (`locador_id`)
     REFERENCES `ints_db`.`locadores` (`id`),
@@ -110,7 +112,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`contratos_locacao` (
     FOREIGN KEY (`criado_por`)
     REFERENCES `ints_db`.`usuarios` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 2
+AUTO_INCREMENT = 3
 DEFAULT CHARACTER SET = utf8mb4
 COMMENT = 'Contratos de locação ativos e histórico';
 
@@ -147,6 +149,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   `local_id_inicial` INT(11) NULL DEFAULT NULL,
   `controla_estoque_proprio` TINYINT(1) NULL DEFAULT 1,
   `tipo_posse` ENUM('proprio', 'locado') NOT NULL DEFAULT 'proprio',
+  `locador_id` INT(11) NULL DEFAULT NULL COMMENT 'FK para tabela locadores',
   `locador_nome` VARCHAR(255) NULL DEFAULT NULL,
   `numero_contrato` VARCHAR(100) NULL DEFAULT NULL,
   `locacao_contrato` VARCHAR(100) NULL DEFAULT NULL,
@@ -166,15 +169,27 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
   INDEX `idx_numero_contrato` (`numero_contrato` ASC) VISIBLE,
   INDEX `idx_contrato_locacao` (`contrato_locacao_id` ASC) VISIBLE,
   INDEX `idx_produtos_tipo_posse_status` (`tipo_posse` ASC, `status_produto` ASC) VISIBLE,
+  INDEX `idx_produtos_locador` (`locador_id` ASC) VISIBLE,
+  INDEX `idx_produtos_contrato` (`contrato_locacao_id` ASC) VISIBLE,
   CONSTRAINT `fk_produto_contrato`
     FOREIGN KEY (`contrato_locacao_id`)
     REFERENCES `ints_db`.`contratos_locacao` (`id`)
     ON DELETE SET NULL,
+  CONSTRAINT `fk_produtos_contrato`
+    FOREIGN KEY (`contrato_locacao_id`)
+    REFERENCES `ints_db`.`contratos_locacao` (`id`)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE,
+  CONSTRAINT `fk_produtos_locador`
+    FOREIGN KEY (`locador_id`)
+    REFERENCES `ints_db`.`locadores` (`id`)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE,
   CONSTRAINT `produtos_ibfk_1`
     FOREIGN KEY (`categoria_id`)
     REFERENCES `ints_db`.`categorias` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 8
+AUTO_INCREMENT = 9
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -200,7 +215,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`acoes_log` (
     FOREIGN KEY (`produto_id`)
     REFERENCES `ints_db`.`produtos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 26
+AUTO_INCREMENT = 28
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -474,6 +489,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`baixas` (
     FOREIGN KEY (`aprovador_id`)
     REFERENCES `ints_db`.`usuarios` (`id`))
 ENGINE = InnoDB
+AUTO_INCREMENT = 2
 DEFAULT CHARACTER SET = utf8mb4;
 
 
@@ -573,7 +589,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`estoques` (
     FOREIGN KEY (`local_id`)
     REFERENCES `ints_db`.`locais` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 10
+AUTO_INCREMENT = 11
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -927,6 +943,33 @@ BEGIN
     
     IF ciclo_detectado = 1 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ciclo detectado na hierarquia de categorias';
+    END IF;
+END$$
+
+USE `ints_db`$$
+CREATE
+DEFINER=`root`@`localhost`
+TRIGGER `ints_db`.`trg_produtos_contrato_update`
+AFTER UPDATE ON `ints_db`.`produtos`
+FOR EACH ROW
+BEGIN
+    IF OLD.contrato_locacao_id != NEW.contrato_locacao_id 
+       OR (OLD.contrato_locacao_id IS NULL AND NEW.contrato_locacao_id IS NOT NULL)
+       OR (OLD.contrato_locacao_id IS NOT NULL AND NEW.contrato_locacao_id IS NULL) THEN
+        
+        -- Atualizar o contrato antigo se existir
+        IF OLD.contrato_locacao_id IS NOT NULL THEN
+            UPDATE contratos_locacao 
+            SET data_atualizado = NOW() 
+            WHERE id = OLD.contrato_locacao_id;
+        END IF;
+        
+        -- Atualizar o contrato novo se existir
+        IF NEW.contrato_locacao_id IS NOT NULL THEN
+            UPDATE contratos_locacao 
+            SET data_atualizado = NOW() 
+            WHERE id = NEW.contrato_locacao_id;
+        END IF;
     END IF;
 END$$
 
