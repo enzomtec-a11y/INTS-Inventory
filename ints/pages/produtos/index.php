@@ -499,11 +499,9 @@ $filtros_ativos += count($filtros_atributos);
 
                         <?php if ($can_edit): ?>
                             <?php if ($is_baixa_total): ?>
-                                <!-- Baixa total: edição e exclusão bloqueadas, apenas leitura -->
-                                <button class="btn-action btn-disabled" title="Produto baixado — edição bloqueada" disabled>✏️</button>
+                                <!-- Baixa total: exclusão bloqueada, apenas leitura -->
                                 <button class="btn-action btn-disabled" title="Produto baixado — exclusão bloqueada" disabled>🗑️</button>
                             <?php else: ?>
-                                <button onclick="abrirModal('editar.php?id=<?php echo $prod['id']; ?>', 'Editar Item')" class="btn-action btn-edit" title="Editar">✏️</button>
                                 <a href="deletar.php?id=<?php echo $prod['id']; ?>" onclick="return confirm('Mover este item para a lixeira?')" class="btn-action btn-del" title="Excluir">🗑️</a>
                             <?php endif; ?>
                         <?php endif; ?>

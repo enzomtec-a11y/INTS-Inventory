@@ -11,49 +11,42 @@ if (isset($_SESSION['usuario_id'])) {
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Sanitização básica
     $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
-    $senha = $_POST['senha']; // Senha não se sanitiza, pois pode ter caracteres especiais
+    $senha = $_POST['senha'];
 
     if (empty($email) || empty($senha)) {
         $erro = "Por favor, preencha todos os campos.";
     } else {
-        // Proteção contra SQL Injection
-        $sql = "SELECT id, nome, email, senha_hash, nivel, ativo FROM usuarios WHERE email = ?";
+        // ✅ CORREÇÃO CRÍTICA: unidade_id agora é selecionado do banco
+        $sql = "SELECT id, nome, email, senha_hash, nivel, unidade_id, ativo FROM usuarios WHERE email = ?";
         $stmt = $conn->prepare($sql);
-        
+
         if ($stmt) {
             $stmt->bind_param("s", $email);
             $stmt->execute();
             $result = $stmt->get_result();
-            
+
             if ($result->num_rows === 1) {
                 $usuario = $result->fetch_assoc();
-                
-                // Verifica se o usuário está ativo
+
                 if ($usuario['ativo'] == 0) {
                     $erro = "Usuário desativado. Contate o administrador.";
-                } 
-                // Verifica a Senha (Hash)
-                elseif (password_verify($senha, $usuario['senha_hash'])) {
-                    // Regenera ID da sessão
+                } elseif (password_verify($senha, $usuario['senha_hash'])) {
                     session_regenerate_id(true);
-                    
-                    $_SESSION['usuario_id'] = $usuario['id'];
-                    $_SESSION['usuario_nome'] = $usuario['nome'];
+
+                    $_SESSION['usuario_id']    = $usuario['id'];
+                    $_SESSION['usuario_nome']  = $usuario['nome'];
                     $_SESSION['usuario_email'] = $usuario['email'];
                     $_SESSION['usuario_nivel'] = $usuario['nivel'];
-                    $_SESSION['unidade_id'] = $usuario['unidade_id'];
-                    
-                    // Redireciona para o index
+                    // ✅ unidade_id agora virá corretamente do banco (null para admin/gestor/comum)
+                    $_SESSION['unidade_id']    = $usuario['unidade_id'];
+
                     header("Location: index.html");
                     exit();
                 } else {
-                    // Senha errada
                     $erro = "E-mail ou senha incorretos.";
                 }
             } else {
-                // Usuário não encontrado
                 $erro = "E-mail ou senha incorretos.";
             }
             $stmt->close();
@@ -68,39 +61,102 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Inventário INTS</title>
-    <link rel="stylesheet" href="assets/css/style.css"> <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; margin: 0; }
-        .login-card { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
-        .login-card h2 { text-align: center; color: #333; margin-bottom: 20px; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; color: #666; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        .btn-login { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; transition: background 0.3s; }
-        .btn-login:hover { background-color: #0056b3; }
-        .erro-msg { background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 20px; text-align: center; border: 1px solid #f5c6cb; }
+    <title>Login - INTS</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .login-box {
+            background: #fff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 8px;
+            color: #2c3e50;
+            font-size: 2em;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: bold;
+            color: #444;
+        }
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 15px;
+            margin-bottom: 20px;
+            transition: border-color .2s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        button[type="submit"] {
+            width: 100%;
+            padding: 12px;
+            background: #4CAF50;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background .2s;
+        }
+        button[type="submit"]:hover { background: #45a049; }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            padding: 12px 16px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
-    <div class="login-card">
-        <h2>Acesso ao Sistema</h2>
-        
+    <div class="login-box">
+        <h1>INTS</h1>
+        <p class="subtitle">Sistema de Inventário</p>
+
         <?php if ($erro): ?>
-            <div class="erro-msg"><?php echo htmlspecialchars($erro); ?></div>
+            <div class="alert-error"><?php echo htmlspecialchars($erro); ?></div>
         <?php endif; ?>
-        
-        <form method="POST" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>">
-            <div class="form-group">
-                <label for="email">E-mail</label>
-                <input type="email" id="email" name="email" required autofocus>
-            </div>
-            
-            <div class="form-group">
-                <label for="senha">Senha</label>
-                <input type="password" id="senha" name="senha" required>
-            </div>
-            
-            <button type="submit" class="btn-login">Entrar</button>
+
+        <form method="POST" action="login.php">
+            <label for="email">E-mail</label>
+            <input type="email" id="email" name="email"
+                   value="<?php echo htmlspecialchars($email ?? ''); ?>"
+                   placeholder="seu@email.com" required autofocus>
+
+            <label for="senha">Senha</label>
+            <input type="password" id="senha" name="senha"
+                   placeholder="••••••••" required>
+
+            <button type="submit">Entrar</button>
         </form>
     </div>
 </body>

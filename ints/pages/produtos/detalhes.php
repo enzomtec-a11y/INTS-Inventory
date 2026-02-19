@@ -673,7 +673,6 @@ $conn->close();
             </div>
             <div class="header-actions">
                 <button onclick="abrirModalBaixa()" class="btn btn-warning">📉 Registrar Baixa</button>
-                <a href="editar.php?id=<?php echo $produto['id']; ?>" class="btn btn-success">✏️ Editar</a>
             </div>
         </div>
     </div>
