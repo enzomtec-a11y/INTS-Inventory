@@ -1,189 +1,168 @@
 <?php
 require_once '../../config/_protecao.php';
-exigirAdmin(); 
 
-$status_message = "";
-$usuario_id_log = getUsuarioId();
-
-// Lógica de Cadastro/Vinculação
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['acao']) && $_POST['acao'] == 'vincular') {
-    $categoria_id = (int)$_POST['categoria_id'];
-    $atributo_id = (int)$_POST['atributo_id'];
-    // O checkbox retorna 'on' ou nada. Convertido para booleano.
-    $obrigatorio = isset($_POST['obrigatorio']) ? 1 : 0;
-
-    // Verificação de ID nulo
-    if (empty($categoria_id) || empty($atributo_id)) {
-        $status_message = "<p style='color: red;'>Erro: Categoria e Atributo são obrigatórios.</p>";
-    } else {
-        // Tenta atualizar a obrigatoriedade se a relação já existir
-        $sql_update = "
-            UPDATE categoria_atributo 
-            SET obrigatorio = ? 
-            WHERE categoria_id = ? AND atributo_id = ?
-        ";
-        $stmt_update = $conn->prepare($sql_update);
-        $stmt_update->bind_param("iii", $obrigatorio, $categoria_id, $atributo_id);
-        $stmt_update->execute();
-        
-        // Se nenhuma linha foi afetada, a relação não existe, então insere
-        if ($stmt_update->affected_rows === 0) {
-            $sql_insert = "
-                INSERT INTO categoria_atributo (categoria_id, atributo_id, obrigatorio) 
-                VALUES (?, ?, ?)
-            ";
-            $stmt_insert = $conn->prepare($sql_insert);
-            $stmt_insert->bind_param("iii", $categoria_id, $atributo_id, $obrigatorio);
-
-            if ($stmt_insert->execute()) {
-                $status_message = "<p style='color: green;'>Relação Categoria-Atributo vinculada com sucesso!</p>";
-            } else {
-                // Caso falhe por duplicidade (em caso de UNIQUE KEY) ou outro erro
-                $status_message = "<p style='color: red;'>Erro ao vincular: " . $stmt_insert->error . "</p>";
-            }
-            $stmt_insert->close();
-        } else {
-            // Se affected_rows > 0, foi um UPDATE (a relação já existia)
-            $status_message = "<p style='color: blue;'>Relação Categoria-Atributo atualizada com sucesso!</p>";
-        }
-        
-        $stmt_update->close();
-    }
-}
-
-// Lógica de Listagem: Buscar Categorias e Atributos para os formulários
+// Busca todas as categorias (para montar a árvore)
 $categorias = [];
-$sql_cat = "SELECT id, nome FROM categorias ORDER BY nome";
-$result_cat = $conn->query($sql_cat);
-while ($row = $result_cat->fetch_assoc()) {
+$sql = "SELECT id, nome, categoria_pai_id FROM categorias WHERE deletado = FALSE ORDER BY categoria_pai_id ASC, nome ASC";
+$res = $conn->query($sql);
+while ($row = $res->fetch_assoc()) {
     $categorias[] = $row;
 }
 
+// Busca todos os atributos
 $atributos = [];
-$sql_attr = "SELECT id, nome, tipo FROM atributos_definicao ORDER BY nome";
-$result_attr = $conn->query($sql_attr);
-while ($row = $result_attr->fetch_assoc()) {
-    $atributos[] = $row;
+$sql = "SELECT * FROM atributos_definicao ORDER BY nome";
+$res = $conn->query($sql);
+while ($row = $res->fetch_assoc()) {
+    $atributos[$row['id']] = $row;
 }
 
-// Lógica de Listagem: Relações Categoria-Atributo existentes
-$relacoes = [];
-$sql_relacoes = "
-    SELECT 
-        ca.id AS relacao_id,
-        c.nome AS categoria_nome,
-        ad.nome AS atributo_nome,
-        ad.tipo AS atributo_tipo,
-        ca.obrigatorio AS obrigatorio
-    FROM 
-        categoria_atributo ca
-    JOIN 
-        categorias c ON ca.categoria_id = c.id
-    JOIN 
-        atributos_definicao ad ON ca.atributo_id = ad.id
-    ORDER BY 
-        c.nome, ad.nome
-";
-$result_relacoes = $conn->query($sql_relacoes);
-if ($result_relacoes) {
-    while ($row = $result_relacoes->fetch_assoc()) {
-        $relacoes[] = $row;
+// Busca todos os vínculos categoria-atributo
+$vinculos = [];
+$sql = "SELECT ca.*, ad.nome as atributo_nome, ad.tipo as atributo_tipo FROM categoria_atributo ca JOIN atributos_definicao ad ON ca.atributo_id = ad.id";
+$res = $conn->query($sql);
+while ($row = $res->fetch_assoc()) {
+    $vinculos[$row['categoria_id']][] = $row;
+}
+
+// Lida com submissão para adicionar novo vínculo
+$status_message = '';
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['acao']) && $_POST['acao'] === 'vincular') {
+    $categoria_id = (int)$_POST['categoria_id'];
+    $atributo_id = (int)$_POST['atributo_id'];
+    $obrigatorio = isset($_POST['obrigatorio']) ? 1 : 0;
+    if ($categoria_id && $atributo_id) {
+        // Verifica se já existe
+        $sql_ver = "SELECT COUNT(*) AS qtd FROM categoria_atributo WHERE categoria_id=? AND atributo_id=?";
+        $stmt = $conn->prepare($sql_ver);
+        $stmt->bind_param("ii", $categoria_id, $atributo_id);
+        $stmt->execute();
+        $stmt->bind_result($qtd_existente);
+        $stmt->fetch();
+        $stmt->close();
+        if ($qtd_existente == 0) {
+            $sql = "INSERT INTO categoria_atributo (categoria_id, atributo_id, obrigatorio) VALUES (?, ?, ?)";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("iii", $categoria_id, $atributo_id, $obrigatorio);
+            if ($stmt->execute()) {
+                $status_message = "<div class='alert success'>Vínculo criado!</div>";
+            } else {
+                $status_message = "<div class='alert error'>Erro ao criar vínculo: " . $stmt->error . "</div>";
+            }
+            $stmt->close();
+        } else {
+            $status_message = "<div class='alert warn'>O vínculo já existe.</div>";
+        }
+    } else {
+        $status_message = "<div class='alert error'>Categoria e atributo obrigatórios!</div>";
+    }
+    // Refresh para evitar repost
+    header("Location: " . $_SERVER["PHP_SELF"]);
+    exit;
+}
+
+// Remover vínculo
+if (isset($_GET['remover']) && is_numeric($_GET['remover'])) {
+    $id = (int)$_GET['remover'];
+    $conn->query("DELETE FROM categoria_atributo WHERE id = $id");
+    header("Location: " . $_SERVER["PHP_SELF"]);
+    exit;
+}
+
+// Alternar obrigatoriedade
+if (isset($_GET['editar_obrigatorio']) && is_numeric($_GET['editar_obrigatorio'])) {
+    $id = (int)$_GET['editar_obrigatorio'];
+    $res = $conn->query("SELECT obrigatorio FROM categoria_atributo WHERE id = $id");
+    if ($res && $row = $res->fetch_assoc()) {
+        $novo = $row['obrigatorio'] ? 0 : 1;
+        $conn->query("UPDATE categoria_atributo SET obrigatorio = $novo WHERE id = $id");
+    }
+    header("Location: " . $_SERVER["PHP_SELF"]);
+    exit;
+}
+
+// Função recursiva para imprimir as categorias e atributos vinculados
+function renderTree($categorias, $vinculos, $atributos, $pai_id = null, $nivel = 0) {
+    foreach ($categorias as $cat) {
+        if ($cat['categoria_pai_id'] == $pai_id) {
+            echo "<div class='categoria-bloco' style='margin-left:".($nivel*24)."px'>";
+            echo "<strong>" . htmlspecialchars($cat['nome']) . "</strong>";
+            
+            // Lista atributos vinculados
+            if (!empty($vinculos[$cat['id']])) {
+                echo "<ul class='atributos-lista'>";
+                foreach ($vinculos[$cat['id']] as $vinc) {
+                    echo "<li><span class='atributo-nome'>" 
+                        . htmlspecialchars($vinc['atributo_nome']) . "</span> ";
+                    echo "<small>(" . htmlspecialchars($vinc['atributo_tipo']) . ")</small> ";
+                    echo $vinc['obrigatorio'] ? "<span class='badge obrigatorio'>Obrigatório</span>" : "<span class='badge opcional'>Opcional</span>";
+                    echo " <a href='?remover={$vinc['id']}' class='btn-remover' title='Desvincular' onclick='return confirm(\"Remover vínculo?\")'>🗑️</a>";
+                    echo " <a href='?editar_obrigatorio={$vinc['id']}' class='btn-obr'>" . ($vinc['obrigatorio'] ? "Tornar Opcional" : "Tornar Obrigatório") . "</a>";
+                    echo "</li>";
+                }
+                echo "</ul>";
+            } else {
+                echo "<div class='nenhum-atributo'>Nenhum atributo vinculado</div>";
+            }
+
+            // Formulário inline para adicionar novo vínculo
+            echo "<form method='POST' style='margin: 6px 0'>";
+            echo "<input type='hidden' name='acao' value='vincular'>";
+            echo "<input type='hidden' name='categoria_id' value='".(int)$cat['id']."'>";
+            echo "<select name='atributo_id' required>";
+            echo "<option value=''>+ Vincular atributo</option>";
+            foreach ($atributos as $att_id => $att) {
+                // Não deixa adicionar o mesmo atributo
+                $ja = false;
+                if (!empty($vinculos[$cat['id']])) {
+                    foreach ($vinculos[$cat['id']] as $vinc) {
+                        if ($vinc['atributo_id'] == $att_id) { $ja = true; break; }
+                    }
+                }
+                if (!$ja) {
+                    echo "<option value='".$att['id']."'>".htmlspecialchars($att['nome']) . " (" . htmlspecialchars($att['tipo']) .")</option>";
+                }
+            }
+            echo "</select> ";
+            echo "<label><input type='checkbox' name='obrigatorio'> Obrigatório</label> ";
+            echo "<button type='submit' class='btn-adicionar'>Adicionar</button>";
+            echo "</form>";
+
+            // Recursão para filhos
+            renderTree($categorias, $vinculos, $atributos, $cat['id'], $nivel+1);
+            echo "</div>";
+        }
     }
 }
-
-$conn->close();
 ?>
-
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Administração - Vínculo Categoria-Atributo</title>
+    <title>Vínculo Categoria x Atributo</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
-        label { display: block; margin-top: 10px; font-weight: bold; }
-        input[type="text"], textarea, select, input[type="number"], input[type="date"] { width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background-color: #4CAF50; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; margin-top: 20px; }
-        button:hover { background-color: #45a049; }
-        .container {max-width: 1200px; margin: 0 auto;}
-        h1 {text-align: center; color: black; font-size: 3em; margin-bottom: 10px;}
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8fafe; margin: 0; padding: 12px;}
+        .categoria-bloco { margin-bottom: 10px; padding: 8px; border: 1px solid #dde4eb; border-radius: 6px; background: #fff;}
+        .atributos-lista { margin: 0 0 8px 16px; padding: 0;}
+        .atributos-lista li { margin-bottom: 3px; list-style: disc;}
+        .atributo-nome { font-weight: bold; }
+        .badge.obrigatorio { color: #fff; background: #c00; border-radius: 3px; padding: 2px 6px; margin-left:3px;}
+        .badge.opcional { color: #555; background: #eee; border-radius: 3px; padding: 2px 6px; margin-left:3px;}
+        .btn-remover { color: #c00; text-decoration: none; margin-left: 10px;}
+        .btn-obr { font-size: small; color: #035a2d; margin-left: 5px; text-decoration: none;}
+        .btn-adicionar { font-size: small; color: #056; background: #e6f3ff; border: 1px solid #b8d6ec; border-radius: 4px; padding:2px 6px;}
+        .nenhum-atributo { color: #aaa; font-style:italic; margin: 2px 0 4px 0;}
+        form { display: inline-block; }
+        select { font-size:small; }
+        .alert { padding: 8px 16px; margin: 12px 0; border-radius:4px; font-weight:bold;}
+        .alert.success { background: #eaffea; color: #17691b; border:1px solid #b0e6b7;}
+        .alert.error { background: #ffecec; color: #a90b0b; border:1px solid #fbc1c1;}
+        .alert.warn { background: #fff8e0; color: #856404; border:1px solid #ffeaa6;}
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Administração de Vínculos Categoria-Atributo</h1>
-        <?php echo $status_message; ?>
-
-        <h2>Vincular Atributo a Categoria</h2>
-        <form method="POST" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>">
-            <input type="hidden" name="acao" value="vincular">
-            
-            <div class="form-group">
-                <label for="categoria_id">Categoria:</label>
-                <select id="categoria_id" name="categoria_id" required>
-                    <option value="">Selecione uma Categoria</option>
-                    <?php foreach ($categorias as $cat): ?>
-                        <option value="<?php echo htmlspecialchars($cat['id']); ?>">
-                            <?php echo htmlspecialchars($cat['nome']); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label for="atributo_id">Atributo:</label>
-                <select id="atributo_id" name="atributo_id" required>
-                    <option value="">Selecione um Atributo</option>
-                    <?php foreach ($atributos as $attr): ?>
-                        <option value="<?php echo htmlspecialchars($attr['id']); ?>">
-                            <?php echo htmlspecialchars($attr['nome']); ?> (Tipo: <?php echo ucfirst($attr['tipo']); ?>)
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-            <div class="checkbox-group">
-                <input type="checkbox" id="obrigatorio" name="obrigatorio">
-                <label for="obrigatorio">Tornar este atributo **Obrigatório** para esta Categoria?</label>
-            </div>
-
-            <button type="submit">Vincular/Atualizar Relação</button>
-        </form>
-
-        ---
-
-        <h2>Relações Atuais</h2>
-        <?php if (!empty($relacoes)): ?>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID da Relação</th>
-                        <th>Categoria</th>
-                        <th>Atributo</th>
-                        <th>Tipo do Atributo</th>
-                        <th>Obrigatório</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($relacoes as $rel): ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($rel['relacao_id']); ?></td>
-                            <td><?php echo htmlspecialchars($rel['categoria_nome']); ?></td>
-                            <td><?php echo htmlspecialchars($rel['atributo_nome']); ?></td>
-                            <td><?php echo htmlspecialchars(ucfirst($rel['atributo_tipo'])); ?></td>
-                            <td>
-                                **<?php echo $rel['obrigatorio'] ? 'SIM' : 'NÃO'; ?>**
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        <?php else: ?>
-            <p>Nenhuma relação Categoria-Atributo definida ainda.</p>
-        <?php endif; ?>
-
-    </div>
+    <h2>Vínculo Categoria x Atributo (Agrupado)</h2>
+    <p>Nesta tela você visualiza os atributos vinculados a cada categoria (e suas filhas) de forma agrupada. Fácil para identificar quais atributos estão onde.</p>
+    <?php if ($status_message) echo $status_message; ?>
+    <?php renderTree($categorias, $vinculos, $atributos); ?>
 </body>
 </html>

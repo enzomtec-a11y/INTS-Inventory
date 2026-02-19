@@ -1,7 +1,10 @@
 <?php
 require_once '../../config/_protecao.php';
-exigirAdmin(); //Por enquanto somente admins vão cadastrar produtos
-
+session_start();
+if ($_SESSION['usuario_nivel'] !== 'admin') {
+    header("Location: /ints/login.php?erro=acesso");
+    exit;
+}
 $status_message = "";
 $usuario_id_log = function_exists('getUsuarioId') ? getUsuarioId() : 0;
 

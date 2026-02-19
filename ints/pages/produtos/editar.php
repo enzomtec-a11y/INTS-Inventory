@@ -1,5 +1,10 @@
 <?php
 require_once '../../config/_protecao.php';
+session_start();
+if ($_SESSION['usuario_nivel'] !== 'admin') {
+    header("Location: /ints/login.php?erro=acesso");
+    exit;
+}
 
 $status_message = "";
 $produto_id = null;
