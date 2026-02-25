@@ -1,12 +1,8 @@
 <?php
 require_once '../../config/_protecao.php';
-session_start();
-if ($_SESSION['usuario_nivel'] !== 'admin') {
-    header("Location: /ints/login.php?erro=acesso");
-    exit;
-}
+exigirAdmin(); // Permite admin + admin_unidade; bloqueia gestor e comum
 $status_message = "";
-$usuario_id_log = function_exists('getUsuarioId') ? getUsuarioId() : 0;
+$usuario_id_log = getUsuarioId();
 
 // --- 1. DETECÇÃO DE USUÁRIO E UNIDADE ---
 $usuario_nivel = $_SESSION['usuario_nivel'] ?? '';

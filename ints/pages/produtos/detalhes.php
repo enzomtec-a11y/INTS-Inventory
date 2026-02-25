@@ -672,6 +672,9 @@ $conn->close();
                 </div>
             </div>
             <div class="header-actions">
+                <?php if (in_array($usuario_nivel, ['admin', 'admin_unidade'])): ?>
+                    <a href="editar.php?id=<?php echo $produto_id; ?>" class="btn btn-info">✏️ Editar Produto</a>
+                <?php endif; ?>
                 <button onclick="abrirModalBaixa()" class="btn btn-warning">📉 Registrar Baixa</button>
             </div>
         </div>
@@ -679,7 +682,7 @@ $conn->close();
     
     <div class="tabs">
         <button class="tab active" onclick="abrirTab('geral')">📋 Informações Gerais</button>
-        <?php if ($produto['tipo_posse'] == 'locado' && ($locador_info || $contrato_info)): ?>
+        <?php if ($produto['tipo_posse'] == 'locado'): ?>
             <button class="tab" onclick="abrirTab('locacao')">🏢 Locação</button>
         <?php endif; ?>
         <button class="tab" onclick="abrirTab('estoque')">📦 Estoque & Locais</button>
@@ -789,8 +792,21 @@ $conn->close();
     </div>
     
     <!-- TAB: Informações de Locação -->
-    <?php if ($produto['tipo_posse'] == 'locado' && ($locador_info || $contrato_info)): ?>
+    <?php if ($produto['tipo_posse'] == 'locado'): ?>
     <div id="tab-locacao" class="tab-content">
+        <?php if (!$locador_info && !$contrato_info): ?>
+        <div class="card">
+            <div class="empty-state">
+                <div class="empty-state-icon">🏢</div>
+                <p>Este produto está marcado como <strong>Locado</strong>, mas ainda não possui locador ou contrato vinculado.</p>
+                <?php if (in_array($usuario_nivel, ['admin', 'admin_unidade'])): ?>
+                    <a href="editar.php?id=<?php echo $produto_id; ?>" class="btn btn-info" style="margin-top: 15px;">
+                        ✏️ Editar produto para vincular locador/contrato
+                    </a>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
         <?php if ($locador_info): ?>
         <div class="card locacao-highlight">
             <h2 class="card-title">🏢 Informações do Locador</h2>

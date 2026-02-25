@@ -302,7 +302,6 @@ $filtros_ativos += count($filtros_atributos);
     <div class="sidebar-divider"></div>
     <?php if ($can_edit): ?>
         <a href="../admin/index.php">⚙️ Administração</a>
-        <a href="../admin/requisicoes/index.php">📋 Requisições</a>
     <?php endif; ?>
 </aside>
 
