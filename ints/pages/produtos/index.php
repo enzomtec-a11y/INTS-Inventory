@@ -296,7 +296,7 @@ $filtros_ativos += count($filtros_atributos);
 
 <aside class="sidebar">
     <h2>INTS Inventário</h2>
-    <a href="../../index.html">🏠 Home</a>
+    <a href="../../index.php">🏠 Home</a>
     <a href="index.php" style="background:#495057; color:#fff;">📦 Produtos</a>
     <a href="../movimentacoes/index.php">🔄 Movimentações</a>
     <div class="sidebar-divider"></div>

@@ -212,7 +212,7 @@ $grupos_admin = [
 
     <aside class="sidebar">
         <h2>INTS Inventário</h2>
-        <a href="../../index.html">🏠 Home</a>
+        <a href="../../index.php">🏠 Home</a>
         <a href="../produtos/index.php">📦 Produtos</a>
         <a href="../movimentacoes/index.php">🔄 Movimentações</a>
         <div style="border-top:1px solid #4b545c; margin:10px 0;"></div>

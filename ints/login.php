@@ -6,7 +6,7 @@ $erro = "";
 
 // Se já estiver logado, manda para o index
 if (isset($_SESSION['usuario_id'])) {
-    header("Location: index.html");
+    header("Location: index.php");
     exit();
 }
 
@@ -41,7 +41,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     // ✅ unidade_id agora virá corretamente do banco (null para admin/gestor/comum)
                     $_SESSION['unidade_id']    = $usuario['unidade_id'];
 
-                    header("Location: index.html");
+                    header("Location: index.php");
                     exit();
                 } else {
                     $erro = "E-mail ou senha incorretos.";
