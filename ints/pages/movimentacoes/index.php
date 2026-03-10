@@ -110,10 +110,11 @@ $stmt->close();
         body { font-family: 'Segoe UI', sans-serif; margin: 0; background-color: #f4f6f9; display: flex; height: 100vh; overflow: hidden; }
         
         /* Sidebar */
-        .sidebar { width: 200px; background: #343a40; color: #fff; display: flex; flex-direction: column; padding: 20px; }
+        .sidebar { width: 200px; background: #343a40; color: #fff; display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
         .sidebar h2 { font-size: 1.2rem; margin-bottom: 20px; color: #f8f9fa; }
-        .sidebar a { color: #ccc; text-decoration: none; padding: 10px; border-radius: 4px; display: block; margin-bottom: 5px; }
-        .sidebar a:hover { background: #495057; color: white; }
+        .sidebar a { color: #ccc; text-decoration: none; padding: 10px; border-radius: 4px; display: block; margin-bottom: 5px; font-size: 0.9em; }
+        .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
+        .sidebar .sidebar-divider { border-top: 1px solid #4b545c; margin: 10px 0; }
         
         .main-content { flex: 1; padding: 20px; overflow-y: auto; position: relative; }
 
@@ -181,8 +182,10 @@ $stmt->close();
         <a href="../../index.php">🏠 Home</a>
         <a href="../produtos/index.php">📦 Produtos</a>
         <a href="index.php" style="background:#495057; color:#fff;">🔄 Movimentações</a>
-        <div style="border-top:1px solid #4b545c; margin:10px 0;"></div>
+        <div class="sidebar-divider"></div>
         <a href="../admin/index.php">⚙️ Administração</a>
+        <div style="margin-top:auto;">  <a href="../../logout.php">🚪 Sair</a>
+        </div>
     </aside>
 
     <main class="main-content">

@@ -156,24 +156,16 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="assets/css/style.css">
     <title>INTS Inventário — Dashboard</title>
     <style>
-        *, *::before, *::after { box-sizing: border-box; }
-
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            margin: 0;
-            background: #f4f6f9;
-            display: flex;
-            height: 100vh;
-            overflow: hidden;
-        }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background-color: #f4f6f9; display: flex; height: 100vh; overflow: hidden; }
 
         /* ── Sidebar ── */
-        .sidebar { width: 200px; background: #343a40; color: #fff; display: flex; flex-direction: column; padding: 20px; }
+        .sidebar { width: 200px; background: #343a40; color: #fff; display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
         .sidebar h2 { font-size: 1.2rem; margin-bottom: 20px; color: #f8f9fa; }
-        .sidebar a { color: #ccc; text-decoration: none; padding: 10px; border-radius: 4px; display: block; margin-bottom: 5px; }
-        .sidebar a:hover { background: #495057; color: white; }
+        .sidebar a { color: #ccc; text-decoration: none; padding: 10px; border-radius: 4px; display: block; margin-bottom: 5px; font-size: 0.9em; }
+        .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
         .sidebar .sidebar-divider { border-top: 1px solid #4b545c; margin: 10px 0; }
 
         /* Badges nos links da sidebar */
@@ -189,12 +181,7 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
             text-align: center;
         }
 
-        /* ── Main ── */
-        .main-content {
-            flex: 1;
-            padding: 24px 28px;
-            overflow-y: auto;
-        }
+        .main-content { flex: 1; padding: 20px; overflow-y: auto; position: relative; }
 
         /* Cabeçalho da página */
         .page-header { margin-bottom: 24px; }
@@ -241,23 +228,6 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
         .kpi-card.purple { border-left-color: #6f42c1; }
         .kpi-card.teal   { border-left-color: #0dcaf0; }
         .kpi-card.warn   { border-left-color: #ffc107; }
-
-        /* Alerta de inconsistência */
-        .alert-inconsistencia {
-            background: #fff3cd;
-            border: 1px solid #ffc107;
-            border-left: 4px solid #fd7e14;
-            border-radius: 8px;
-            padding: 14px 18px;
-            margin-bottom: 24px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 0.92rem;
-            color: #664d03;
-        }
-        .alert-inconsistencia a { color: #fd7e14; font-weight: 600; text-decoration: none; }
-        .alert-inconsistencia a:hover { text-decoration: underline; }
 
         /* ── Acesso Rápido ── */
         .section-title {
@@ -331,13 +301,15 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
 <!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
 <aside class="sidebar">
     <h2>INTS Inventário</h2>
-    <a href="../../index.php" style="background:#495057; color:#fff;">🏠 Home</a>
+    <a href="index.php" style="background:#495057; color:#fff;">🏠 Home</a>
     <a href="pages/produtos/index.php">📦 Produtos</a>
     <a href="pages/movimentacoes/index.php">🔄 Movimentações</a>
     <div class="sidebar-divider"></div>
     <?php if ($is_admin): ?>
         <a href="pages/admin/index.php">⚙️ Administração</a>
     <?php endif; ?>
+    <div style="margin-top:auto;">  <a href="logout.php">🚪 Sair</a>
+    </div>
 </aside>
 
 <!-- ══════════════════════════ CONTEÚDO ══════════════════════════ -->
@@ -385,26 +357,11 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
             <div class="kpi-value"><?php echo $total_em_transito; ?></div>
         </a>
 
-        <a href="pages/baixas/index.php" class="kpi-card red">
-            <div class="kpi-icon">📉</div>
-            <div class="kpi-label">Baixas Pendentes</div>
-            <div class="kpi-value"><?php echo $total_baixas_pend; ?></div>
-        </a>
-
         <a href="pages/produtos/index.php" class="kpi-card purple">
             <div class="kpi-icon">🏷️</div>
             <div class="kpi-label">Patrimônios Ativos</div>
             <div class="kpi-value"><?php echo number_format($total_patrimonios); ?></div>
         </a>
-
-        <?php if ($is_admin): ?>
-        <a href="pages/admin/corrigir_inconsistencias.php" class="kpi-card warn">
-            <div class="kpi-icon">⚠️</div>
-            <div class="kpi-label">Inconsistências</div>
-            <div class="kpi-value"><?php echo $total_inconsistencias; ?></div>
-        </a>
-        <?php endif; ?>
-
     </div>
 
     <!-- Acesso Rápido -->

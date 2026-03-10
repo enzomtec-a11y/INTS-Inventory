@@ -15,6 +15,14 @@ SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,N
 -- Schema ints_db
 -- -----------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS `ints_db` DEFAULT CHARACTER SET utf8mb4 ;
+-- -----------------------------------------------------
+-- Schema mysql_old
+-- -----------------------------------------------------
+
+-- -----------------------------------------------------
+-- Schema mysql_old
+-- -----------------------------------------------------
+CREATE SCHEMA IF NOT EXISTS `mysql_old` DEFAULT CHARACTER SET utf8mb4 ;
 USE `ints_db` ;
 
 -- -----------------------------------------------------
@@ -33,7 +41,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`usuarios` (
   UNIQUE INDEX `email` (`email` ASC) VISIBLE,
   INDEX `idx_usuarios_unidade` (`unidade_id` ASC) VISIBLE)
 ENGINE = InnoDB
-AUTO_INCREMENT = 9
+AUTO_INCREMENT = 12
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -189,7 +197,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`produtos` (
     FOREIGN KEY (`categoria_id`)
     REFERENCES `ints_db`.`categorias` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 9
+AUTO_INCREMENT = 10
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -215,7 +223,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`acoes_log` (
     FOREIGN KEY (`produto_id`)
     REFERENCES `ints_db`.`produtos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 28
+AUTO_INCREMENT = 34
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -365,7 +373,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`atributos_valor` (
     FOREIGN KEY (`valor_permitido_id`)
     REFERENCES `ints_db`.`atributos_valores_permitidos` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 28
+AUTO_INCREMENT = 37
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -438,7 +446,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`locais` (
     FOREIGN KEY (`local_pai_id`)
     REFERENCES `ints_db`.`locais` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 8
+AUTO_INCREMENT = 9
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -589,7 +597,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`estoques` (
     FOREIGN KEY (`local_id`)
     REFERENCES `ints_db`.`locais` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 11
+AUTO_INCREMENT = 13
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -601,7 +609,8 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`movimentacoes` (
   `movimentacao_pai_id` INT(11) NULL DEFAULT NULL,
   `produto_id` INT(11) NOT NULL,
   `local_origem_id` INT(11) NOT NULL,
-  `local_destino_id` INT(11) NOT NULL,
+  `local_destino_id` INT(11) NULL DEFAULT NULL,
+  `unidade_destino_id` INT(11) NULL DEFAULT NULL,
   `quantidade` INT(11) NOT NULL DEFAULT 1,
   `usuario_id` INT(11) NOT NULL,
   `usuario_aprovacao_id` INT(11) NULL DEFAULT NULL,
@@ -618,6 +627,10 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`movimentacoes` (
   INDEX `idx_movimentacoes_data` (`data_movimentacao` ASC) VISIBLE,
   INDEX `idx_mov_pai` (`movimentacao_pai_id` ASC) VISIBLE,
   INDEX `idx_mov_usuario_recebimento` (`usuario_recebimento_id` ASC) VISIBLE,
+  INDEX `idx_mov_unidade_destino` (`unidade_destino_id` ASC) VISIBLE,
+  CONSTRAINT `fk_mov_unidade_destino`
+    FOREIGN KEY (`unidade_destino_id`)
+    REFERENCES `ints_db`.`locais` (`id`),
   CONSTRAINT `fk_movimentacao_pai`
     FOREIGN KEY (`movimentacao_pai_id`)
     REFERENCES `ints_db`.`movimentacoes` (`id`),
@@ -634,7 +647,7 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`movimentacoes` (
     FOREIGN KEY (`usuario_id`)
     REFERENCES `ints_db`.`usuarios` (`id`))
 ENGINE = InnoDB
-AUTO_INCREMENT = 4
+AUTO_INCREMENT = 5
 DEFAULT CHARACTER SET = latin1;
 
 
@@ -773,6 +786,44 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`reservas` (
 ENGINE = InnoDB
 DEFAULT CHARACTER SET = latin1;
 
+USE `mysql_old` ;
+
+-- -----------------------------------------------------
+-- Table `mysql_old`.`general_log`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `mysql_old`.`general_log` (
+  `event_time` TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  `user_host` MEDIUMTEXT NOT NULL,
+  `thread_id` BIGINT(21) UNSIGNED NOT NULL,
+  `server_id` INT(10) UNSIGNED NOT NULL,
+  `command_type` VARCHAR(64) NOT NULL,
+  `argument` MEDIUMTEXT NOT NULL)
+ENGINE = CSV
+DEFAULT CHARACTER SET = utf8
+COMMENT = 'General log';
+
+
+-- -----------------------------------------------------
+-- Table `mysql_old`.`slow_log`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `mysql_old`.`slow_log` (
+  `start_time` TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  `user_host` MEDIUMTEXT NOT NULL,
+  `query_time` TIME NOT NULL,
+  `lock_time` TIME NOT NULL,
+  `rows_sent` INT(11) NOT NULL,
+  `rows_examined` INT(11) NOT NULL,
+  `db` VARCHAR(512) NOT NULL,
+  `last_insert_id` INT(11) NOT NULL,
+  `insert_id` INT(11) NOT NULL,
+  `server_id` INT(10) UNSIGNED NOT NULL,
+  `sql_text` MEDIUMTEXT NOT NULL,
+  `thread_id` BIGINT(21) UNSIGNED NOT NULL,
+  `rows_affected` INT(11) NOT NULL)
+ENGINE = CSV
+DEFAULT CHARACTER SET = utf8
+COMMENT = 'Slow log';
+
 USE `ints_db` ;
 
 -- -----------------------------------------------------
@@ -789,111 +840,6 @@ CREATE TABLE IF NOT EXISTS `ints_db`.`vw_patrimonios_completo` (`patrimonio_id` 
 -- Placeholder table for view `ints_db`.`vw_produtos_locados`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `ints_db`.`vw_produtos_locados` (`produto_id` INT, `produto_nome` INT, `numero_patrimonio` INT, `status_produto` INT, `contrato_id` INT, `numero_contrato` INT, `contrato_status` INT, `data_inicio` INT, `data_fim` INT, `valor_mensal` INT, `locador_id` INT, `locador_nome` INT, `cnpj` INT, `locador_telefone` INT, `locador_email` INT, `dias_para_vencimento` INT, `situacao_contrato` INT);
-
--- -----------------------------------------------------
--- function gerar_numero_patrimonio
--- -----------------------------------------------------
-
-DELIMITER $$
-USE `ints_db`$$
-CREATE DEFINER=`root`@`localhost` FUNCTION `gerar_numero_patrimonio`(p_unidade_id INT, p_categoria_id INT, p_produto_id INT) RETURNS varchar(50) CHARSET utf8mb4 COLLATE utf8mb4_general_ci
-    DETERMINISTIC
-BEGIN
-    DECLARE novo_codigo VARCHAR(50);
-    DECLARE sequencial INT;
-    
-    -- Se não houver unidade definida, usa 0
-    SET p_unidade_id = IFNULL(p_unidade_id, 0);
-    
-    -- Pega o próximo número baseado no ID do produto (ou você pode criar uma tabela de sequenciais se preferir)
-    -- Aqui estou usando o próprio ID do produto com padding de zeros para simplificar e garantir unicidade
-    SET sequencial = p_produto_id;
-    
-    -- Formato: UUU-CCC-PPPPPP (Unidade-Categoria-Produto)
-    SET novo_codigo = CONCAT(
-        LPAD(p_unidade_id, 3, '0'), '-', 
-        LPAD(p_categoria_id, 3, '0'), '-', 
-        LPAD(sequencial, 6, '0')
-    );
-    
-    RETURN novo_codigo;
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure sp_gerar_alertas_locacao
--- -----------------------------------------------------
-
-DELIMITER $$
-USE `ints_db`$$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_gerar_alertas_locacao`()
-BEGIN
-    -- Limpar alertas antigos não visualizados (mais de 90 dias)
-    DELETE FROM alertas_locacao 
-    WHERE visualizado = 0 AND data_criado < DATE_SUB(CURDATE(), INTERVAL 90 DAY);
-    
-    -- Alertar contratos vencendo em 30 dias
-    INSERT INTO alertas_locacao (contrato_id, tipo_alerta, mensagem, data_alerta)
-    SELECT 
-        c.id,
-        'vencimento_proximo',
-        CONCAT('Contrato ', c.numero_contrato, ' vence em ', DATEDIFF(c.data_fim, CURDATE()), ' dias'),
-        CURDATE()
-    FROM contratos_locacao c
-    WHERE c.status = 'ativo'
-      AND c.data_fim IS NOT NULL
-      AND DATEDIFF(c.data_fim, CURDATE()) <= 30
-      AND DATEDIFF(c.data_fim, CURDATE()) > 0
-      AND NOT EXISTS (
-          SELECT 1 FROM alertas_locacao a 
-          WHERE a.contrato_id = c.id 
-            AND a.tipo_alerta = 'vencimento_proximo'
-            AND a.data_alerta >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-      );
-    
-    -- Alertar contratos vencidos
-    UPDATE contratos_locacao 
-    SET status = 'vencido'
-    WHERE status = 'ativo' 
-      AND data_fim IS NOT NULL 
-      AND data_fim < CURDATE();
-    
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure sp_registrar_movimentacao
--- -----------------------------------------------------
-
-DELIMITER $$
-USE `ints_db`$$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_registrar_movimentacao`(
-    IN p_produto_id INT,
-    IN p_origem_id INT,
-    IN p_destino_id INT,
-    IN p_qtd INT,
-    IN p_usuario_id INT
-)
-BEGIN
-    START TRANSACTION;
-        -- 1. Tira da origem
-        UPDATE estoques SET quantidade = quantidade - p_qtd 
-        WHERE produto_id = p_produto_id AND local_id = p_origem_id;
-        
-        -- 2. Coloca no destino (ou cria se não existir)
-        INSERT INTO estoques (produto_id, local_id, quantidade)
-        VALUES (p_produto_id, p_destino_id, p_qtd)
-        ON DUPLICATE KEY UPDATE quantidade = quantidade + p_qtd;
-        
-        -- 3. Registra o Log de Movimentação
-        INSERT INTO movimentacoes (produto_id, local_origem_id, local_destino_id, quantidade, usuario_id, status)
-        VALUES (p_produto_id, p_origem_id, p_destino_id, p_qtd, p_usuario_id, 'finalizado');
-    COMMIT;
-END$$
-
-DELIMITER ;
 
 -- -----------------------------------------------------
 -- View `ints_db`.`vw_patrimonio_detalhado`
@@ -915,6 +861,19 @@ CREATE  OR REPLACE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY D
 DROP TABLE IF EXISTS `ints_db`.`vw_produtos_locados`;
 USE `ints_db`;
 CREATE  OR REPLACE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `ints_db`.`vw_produtos_locados` AS select `p`.`id` AS `produto_id`,`p`.`nome` AS `produto_nome`,`p`.`numero_patrimonio` AS `numero_patrimonio`,`p`.`status_produto` AS `status_produto`,`c`.`id` AS `contrato_id`,`c`.`numero_contrato` AS `numero_contrato`,`c`.`status` AS `contrato_status`,`c`.`data_inicio` AS `data_inicio`,`c`.`data_fim` AS `data_fim`,`c`.`valor_mensal` AS `valor_mensal`,`l`.`id` AS `locador_id`,`l`.`nome` AS `locador_nome`,`l`.`cnpj` AS `cnpj`,`l`.`telefone` AS `locador_telefone`,`l`.`email` AS `locador_email`,to_days(`c`.`data_fim`) - to_days(curdate()) AS `dias_para_vencimento`,case when `c`.`data_fim` < curdate() then 'VENCIDO' when to_days(`c`.`data_fim`) - to_days(curdate()) <= 30 then 'VENCE_EM_BREVE' else 'VIGENTE' end AS `situacao_contrato` from ((`ints_db`.`produtos` `p` join `ints_db`.`contratos_locacao` `c` on(`p`.`contrato_locacao_id` = `c`.`id`)) join `ints_db`.`locadores` `l` on(`c`.`locador_id` = `l`.`id`)) where `p`.`tipo_posse` = 'locado' and `p`.`deletado` = 0;
+USE `mysql_old` ;
+
+-- -----------------------------------------------------
+-- Placeholder table for view `mysql_old`.`user`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `mysql_old`.`user` (`Host` INT, `User` INT, `Password` INT, `Select_priv` INT, `Insert_priv` INT, `Update_priv` INT, `Delete_priv` INT, `Create_priv` INT, `Drop_priv` INT, `Reload_priv` INT, `Shutdown_priv` INT, `Process_priv` INT, `File_priv` INT, `Grant_priv` INT, `References_priv` INT, `Index_priv` INT, `Alter_priv` INT, `Show_db_priv` INT, `Super_priv` INT, `Create_tmp_table_priv` INT, `Lock_tables_priv` INT, `Execute_priv` INT, `Repl_slave_priv` INT, `Repl_client_priv` INT, `Create_view_priv` INT, `Show_view_priv` INT, `Create_routine_priv` INT, `Alter_routine_priv` INT, `Create_user_priv` INT, `Event_priv` INT, `Trigger_priv` INT, `Create_tablespace_priv` INT, `Delete_history_priv` INT, `ssl_type` INT, `ssl_cipher` INT, `x509_issuer` INT, `x509_subject` INT, `max_questions` INT, `max_updates` INT, `max_connections` INT, `max_user_connections` INT, `plugin` INT, `authentication_string` INT, `password_expired` INT, `is_role` INT, `default_role` INT, `max_statement_time` INT);
+
+-- -----------------------------------------------------
+-- View `mysql_old`.`user`
+-- -----------------------------------------------------
+DROP TABLE IF EXISTS `mysql_old`.`user`;
+USE `mysql_old`;
+CREATE  OR REPLACE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `mysql_old`.`user` AS select `mysql`.`global_priv`.`Host` AS `Host`,`mysql`.`global_priv`.`User` AS `User`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.plugin') in ('mysql_native_password','mysql_old_password'),ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.authentication_string'),''),'') AS `Password`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 1,'Y','N') AS `Select_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 2,'Y','N') AS `Insert_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 4,'Y','N') AS `Update_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 8,'Y','N') AS `Delete_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 16,'Y','N') AS `Create_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 32,'Y','N') AS `Drop_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 64,'Y','N') AS `Reload_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 128,'Y','N') AS `Shutdown_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 256,'Y','N') AS `Process_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 512,'Y','N') AS `File_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 1024,'Y','N') AS `Grant_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 2048,'Y','N') AS `References_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 4096,'Y','N') AS `Index_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 8192,'Y','N') AS `Alter_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 16384,'Y','N') AS `Show_db_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 32768,'Y','N') AS `Super_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 65536,'Y','N') AS `Create_tmp_table_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 131072,'Y','N') AS `Lock_tables_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 262144,'Y','N') AS `Execute_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 524288,'Y','N') AS `Repl_slave_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 1048576,'Y','N') AS `Repl_client_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 2097152,'Y','N') AS `Create_view_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 4194304,'Y','N') AS `Show_view_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 8388608,'Y','N') AS `Create_routine_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 16777216,'Y','N') AS `Alter_routine_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 33554432,'Y','N') AS `Create_user_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 67108864,'Y','N') AS `Event_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 134217728,'Y','N') AS `Trigger_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 268435456,'Y','N') AS `Create_tablespace_priv`,if(json_value(`mysql`.`global_priv`.`Priv`,'$.access') & 536870912,'Y','N') AS `Delete_history_priv`,elt(ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.ssl_type'),0) + 1,'','ANY','X509','SPECIFIED') AS `ssl_type`,ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.ssl_cipher'),'') AS `ssl_cipher`,ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.x509_issuer'),'') AS `x509_issuer`,ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.x509_subject'),'') AS `x509_subject`,cast(ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.max_questions'),0) as unsigned) AS `max_questions`,cast(ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.max_updates'),0) as unsigned) AS `max_updates`,cast(ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.max_connections'),0) as unsigned) AS `max_connections`,cast(ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.max_user_connections'),0) as signed) AS `max_user_connections`,ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.plugin'),'') AS `plugin`,ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.authentication_string'),'') AS `authentication_string`,'N' AS `password_expired`,elt(ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.is_role'),0) + 1,'N','Y') AS `is_role`,ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.default_role'),'') AS `default_role`,cast(ifnull(json_value(`mysql`.`global_priv`.`Priv`,'$.max_statement_time'),0.0) as decimal(12,6)) AS `max_statement_time` from `mysql`.`global_priv`;
 USE `ints_db`;
 
 DELIMITER $$

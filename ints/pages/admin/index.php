@@ -127,12 +127,21 @@ $grupos_admin = [
         /* Layout Básico */
         body { font-family: 'Segoe UI', sans-serif; margin: 0; background-color: #f4f6f9; display: flex; height: 100vh; overflow: hidden; }
         
-        .sidebar { width: 200px; background: #343a40; color: #fff; display: flex; flex-direction: column; padding: 20px; }
+        /* ── Sidebar ── */
+        .sidebar { width: 200px; background: #343a40; color: #fff; display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
         .sidebar h2 { font-size: 1.2rem; margin-bottom: 20px; color: #f8f9fa; }
-        .sidebar a { color: #ccc; text-decoration: none; padding: 10px; border-radius: 4px; display: block; margin-bottom: 5px; }
-        .sidebar a:hover { background: #495057; color: white; }
-        
+        .sidebar a { color: #ccc; text-decoration: none; padding: 10px; border-radius: 4px; display: block; margin-bottom: 5px; font-size: 0.9em; }
+        .sidebar a:hover, .sidebar a.active { background: #495057; color: white; }
+        .sidebar .sidebar-divider { border-top: 1px solid #4b545c; margin: 10px 0; }
+
+        /* ── Layout principal ── */
         .main-content { flex: 1; padding: 20px; overflow-y: auto; position: relative; }
+        .top-bar { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .top-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .top-header h1 { margin: 0; font-size: 1.5rem; color: #2c3e50; }
+        .action-buttons { display: flex; gap: 10px; }
+        .btn-novo { background: #28a745; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 0.9rem; }
+        .btn-novo:hover { background: #218838; }
 
         /* Grid de Cards */
         .admin-section { margin-bottom: 40px; }
@@ -215,8 +224,10 @@ $grupos_admin = [
         <a href="../../index.php">🏠 Home</a>
         <a href="../produtos/index.php">📦 Produtos</a>
         <a href="../movimentacoes/index.php">🔄 Movimentações</a>
-        <div style="border-top:1px solid #4b545c; margin:10px 0;"></div>
+        <div class="sidebar-divider"></div>
         <a href="index.php" style="background:#495057; color:#fff;">⚙️ Administração</a>
+        <div style="margin-top:auto;">  <a href="../../logout.php">🚪 Sair</a>
+        </div>
     </aside>
 
     <main class="main-content">
