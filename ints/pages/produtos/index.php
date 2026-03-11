@@ -1,5 +1,6 @@
 <?php
 require_once '../../config/_protecao.php';
+$conn->set_charset('utf8mb4');
 
 $usuario_nivel    = $_SESSION['usuario_nivel'] ?? '';
 $usuario_unidade  = isset($_SESSION['unidade_id']) ? (int)$_SESSION['unidade_id'] : 0;
@@ -7,7 +8,12 @@ $unidade_locais_ids = [];
 
 $is_admin        = in_array($usuario_nivel, ['admin', 'admin_unidade', 'gestor']);
 $is_admin_global = ($usuario_nivel === 'admin');
-$can_edit        = in_array($usuario_nivel, ['admin', 'admin_unidade']);
+
+// Permissões: somente admin global e admin_unidade podem criar/editar/excluir
+$can_manage = in_array($usuario_nivel, ['admin', 'admin_unidade']); // cria, edita, exclui
+$can_edit   = $can_manage; // mantido por compatibilidade com código existente
+$can_create = $can_manage;
+$can_delete = $can_manage;
 
 if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
     if (function_exists('getIdsLocaisDaUnidade')) {
@@ -97,6 +103,7 @@ if (!empty($filtro_cat)) {
         ? getIdsCategoriasDaHierarquia($conn, (int)$filtro_cat)
         : [(int)$filtro_cat];
     if (!empty($ids_hierarquia_cat)) {
+        // segurança: cast ints
         $idsStrCat = implode(',', array_map('intval', $ids_hierarquia_cat));
         $where_conditions[] = "p.categoria_id IN ($idsStrCat)";
     }
@@ -130,7 +137,7 @@ if (!empty($filtro_contrato)) {
     $params[] = "%$filtro_contrato%";
     $types .= "s";
 }
-// Restrição de unidade
+// Restrição de unidade (aplicada só se não vazia)
 if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
     $idsUnidade = implode(',', array_map('intval', $unidade_locais_ids));
     $where_conditions[] = "e.local_id IN ($idsUnidade)";
@@ -151,9 +158,13 @@ $base_joins = "
 $total_items = 0;
 $stmt_count = $conn->prepare("SELECT COUNT(DISTINCT p.id) AS total $base_joins $where_sql");
 if ($stmt_count) {
-    if (!empty($params)) $stmt_count->bind_param($types, ...$params);
+    if (!empty($params)) {
+        // bind only when params exist
+        $stmt_count->bind_param($types, ...$params);
+    }
     $stmt_count->execute();
-    $total_items = (int)$stmt_count->get_result()->fetch_assoc()['total'];
+    $resCount = $stmt_count->get_result();
+    $total_items = $resCount ? (int)$resCount->fetch_assoc()['total'] : 0;
     $stmt_count->close();
 }
 
@@ -165,12 +176,19 @@ $offset        = ($pagina_atual - 1) * $itens_por_pagina;
 // IDs DA PÁGINA ATUAL
 // =============================
 $page_ids = [];
-$params_ids = array_merge($params, [$itens_por_pagina, $offset]);
-$types_ids  = $types . "ii";
+$params_ids = $params; // copy base params
+$types_ids  = $types . "ii"; // limit + offset
+
+// append limit and offset values
+$params_ids[] = $itens_por_pagina;
+$params_ids[] = $offset;
 
 $stmt_ids = $conn->prepare("SELECT DISTINCT p.id $base_joins $where_sql ORDER BY p.nome ASC, p.id ASC LIMIT ? OFFSET ?");
 if ($stmt_ids) {
-    $stmt_ids->bind_param($types_ids, ...$params_ids);
+    // Only bind when prepare succeeded
+    if (!empty($params_ids)) {
+        $stmt_ids->bind_param($types_ids, ...$params_ids);
+    }
     $stmt_ids->execute();
     $res_ids = $stmt_ids->get_result();
     while ($r = $res_ids->fetch_assoc()) $page_ids[] = (int)$r['id'];
@@ -183,7 +201,8 @@ if ($stmt_ids) {
 $produtos_agregados = [];
 
 if (!empty($page_ids)) {
-    $ids_str = implode(',', $page_ids);
+    // segurança: garantir inteiros
+    $ids_str = implode(',', array_map('intval', $page_ids));
 
     $sql_main = "
         SELECT
@@ -347,8 +366,13 @@ function renderPaginacao(int $pagina_atual, int $total_paginas, string $url_base
         .top-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
         .top-header h1 { margin: 0; font-size: 1.5rem; color: #2c3e50; }
         .action-buttons { display: flex; gap: 10px; }
-        .btn-novo { background: #28a745; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 0.9rem; }
-        .btn-novo:hover { background: #218838; }
+
+        /* transformamos o botão de criar em card-like (visual consistente com detalhes) */
+        .btn-novo {
+            background: #28a745; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 0.95rem; border: none; cursor: pointer;
+            display: inline-flex; align-items:center; gap:8px;
+        }
+        .btn-novo:hover { background: #218838; box-shadow: 0 4px 12px rgba(33,136,56,0.12); transform: translateY(-2px); }
 
         /* ── Filtros básicos ── */
         .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-items: end; }
@@ -382,10 +406,10 @@ function renderPaginacao(int $pagina_atual, int $total_paginas, string $url_base
         .status-baixa_parcial{ background: #fff3cd; color: #856404; }
 
         /* Botões de ação */
-        .btn-action { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 4px; text-decoration: none; font-size: 1em; margin-right: 3px; }
+        .btn-action { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 4px; text-decoration: none; font-size: 1em; margin-right: 3px; color:#fff; }
         .btn-view { background: #17a2b8; }
         .btn-view:hover { background: #138496; }
-        .btn-edit { background: #ffc107; }
+        .btn-edit { background: #ffc107; color:#222; }
         .btn-edit:hover { background: #e0a800; }
         .btn-del  { background: #dc3545; }
         .btn-del:hover { background: #bd2130; }
@@ -415,23 +439,6 @@ function renderPaginacao(int $pagina_atual, int $total_paginas, string $url_base
         /* Modal Filtros Avançados */
         .advanced-filter-modal { background: #fff; width: 90%; max-width: 560px; max-height: 85vh; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; animation: slideIn 0.25s ease; }
         .advanced-filter-content { flex: 1; overflow-y: auto; padding: 20px; }
-        .filter-section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee; }
-        .filter-section:last-child { border-bottom: none; margin-bottom: 0; }
-        .filter-section h3 { margin: 0 0 14px; color: #2c3e50; font-size: 0.95em; }
-        .form-row { margin-bottom: 12px; }
-        .form-row label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 0.88em; color: #555; }
-        .form-row input, .form-row select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 0.9em; }
-        .modal-footer { padding: 14px 20px; background: #f8f9fa; border-top: 1px solid #ddd; display: flex; justify-content: flex-end; gap: 10px; }
-        .btn-secondary { background: #6c757d; color: white; border: none; padding: 9px 18px; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
-        .btn-secondary:hover { background: #5a6268; }
-
-        /* Seletor hierárquico de categorias no modal */
-        .cat-breadcrumb { background: #f0f4ff; border: 1px solid #c5d5f0; border-radius: 5px; padding: 8px 12px; font-size: 0.88em; color: #2c3e50; margin-bottom: 12px; min-height: 32px; }
-        .modal-categoria-level { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-        .modal-categoria-level label { min-width: 60px; font-size: 0.82em; font-weight: 600; color: #666; }
-        .modal-categoria-level select { flex: 1; padding: 7px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.88em; }
-        .btn-clear-cat { background: none; border: 1px solid #ddd; border-radius: 4px; padding: 4px 10px; font-size: 0.8em; color: #666; cursor: pointer; margin-top: 6px; }
-        .btn-clear-cat:hover { background: #f8d7da; border-color: #f5c6cb; color: #721c24; }
     </style>
 </head>
 <body>
@@ -457,8 +464,9 @@ function renderPaginacao(int $pagina_atual, int $total_paginas, string $url_base
         <div class="top-header">
             <h1>📋 Produtos</h1>
             <div class="action-buttons">
-                <?php if ($can_edit): ?>
-                    <a href="cadastrar.php" class="btn-novo">+ Novo Produto</a>
+                <?php if ($can_create): ?>
+                    <!-- Abrir formulário de cadastro dentro do modal (mesmo comportamento do botão 'Visualizar') -->
+                    <button type="button" class="btn-novo" onclick="abrirModal('cadastrar.php','Cadastrar Produto')">+ Novo Produto</button>
                 <?php endif; ?>
             </div>
         </div>
@@ -554,7 +562,7 @@ function renderPaginacao(int $pagina_atual, int $total_paginas, string $url_base
                     <th style="width:135px;">Categoria</th>
                     <th style="width:145px;">Localização</th>
                     <th style="width:110px;">Status</th>
-                    <th style="width:<?php echo $can_edit ? '100px' : '60px'; ?>; text-align:center;">Ações</th>
+                    <th style="width:<?php echo $can_manage ? '100px' : '60px'; ?>; text-align:center;">Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -641,7 +649,7 @@ function renderPaginacao(int $pagina_atual, int $total_paginas, string $url_base
     <?php endif; ?>
 </main>
 
-<!-- ========== MODAL PRINCIPAL (detalhes/editar) ========== -->
+<!-- ========== MODAL PRINCIPAL (detalhes/editar/cadastrar) ========== -->
 <div id="modalContainer" class="modal-overlay">
     <div class="modal-window">
         <div class="modal-header">
@@ -725,7 +733,7 @@ function renderPaginacao(int $pagina_atual, int $total_paginas, string $url_base
 <!-- ========== SCRIPTS ========== -->
 <script>
 // ──────────────────────────────────────────────
-// Modal principal (detalhes / editar)
+// Modal principal (detalhes / editar / cadastrar)
 // ──────────────────────────────────────────────
 function abrirModal(url, titulo) {
     document.getElementById('modalTitle').innerText = titulo;
@@ -738,10 +746,15 @@ function fecharModal(recarregar) {
     document.getElementById('modalFrame').src = '';
     if (recarregar) location.reload();
 }
+// alias usado por o formulário child (cadastrar.php) para fechar o modal e recarregar a lista
+window.fecharModalDoFilho = function(recarregar) { fecharModal(!!recarregar); };
+
+// backward-compatible alias (alguns lugares chamam fecharERecarregar)
+window.fecharERecarregar = function() { fecharModal(true); };
+
 document.getElementById('modalContainer').addEventListener('click', function(e) {
     if (e.target === this) fecharModal(false);
 });
-window.fecharERecarregar = function() { fecharModal(true); };
 
 // ──────────────────────────────────────────────
 // Modal de filtros avançados
@@ -785,13 +798,11 @@ function toggleBaixados(chk) {
         categoriaPath = [...pathInicial];
         atualizarBreadcrumb();
 
-        // Pré-selecionar nível 0
         const sel0 = container.querySelector('select[data-nivel="0"]');
         if (sel0 && pathInicial[0]) {
             sel0.value = pathInicial[0].id;
         }
 
-        // Carregar subníveis encadeados
         (async function preencherNiveis() {
             for (let i = 0; i < pathInicial.length - 1; i++) {
                 const catId = pathInicial[i].id;
@@ -804,7 +815,6 @@ function toggleBaixados(chk) {
                     }
                 } catch(e) {}
             }
-            // Carregar filhos da última selecionada (se existirem)
             const ultimoId = pathInicial[pathInicial.length - 1].id;
             try {
                 const r = await fetch(`../../api/categorias_filhos.php?categoria_id=${ultimoId}`);
@@ -816,7 +826,6 @@ function toggleBaixados(chk) {
         })();
     }
 
-    // Delegação de eventos para todos os selects hierárquicos
     container.addEventListener('change', function(e) {
         const sel = e.target;
         if (!sel.classList.contains('modal-cat-select')) return;
@@ -824,7 +833,6 @@ function toggleBaixados(chk) {
         const nivel     = parseInt(sel.dataset.nivel);
         const catId     = sel.value;
 
-        // Remove todos os níveis abaixo do atual
         container.querySelectorAll('.modal-categoria-level').forEach(div => {
             if (parseInt(div.dataset.nivel) > nivel) div.remove();
         });
@@ -835,7 +843,6 @@ function toggleBaixados(chk) {
             categoriaPath.push({ id: parseInt(catId), nome: nomeSelecionado });
             hiddenInput.value = catId;
 
-            // Tentar carregar subcategorias
             fetch(`../../api/categorias_filhos.php?categoria_id=${catId}`)
                 .then(r => r.json())
                 .then(d => {
@@ -846,7 +853,6 @@ function toggleBaixados(chk) {
                 .catch(() => {});
         } else {
             categoriaPath = categoriaPath.slice(0, nivel);
-            // Se limpar o nível 0, reset do hidden
             if (nivel === 0) hiddenInput.value = '';
             else hiddenInput.value = categoriaPath.length > 0 ? categoriaPath[categoriaPath.length - 1].id : '';
         }
@@ -855,7 +861,6 @@ function toggleBaixados(chk) {
     });
 
     function adicionarNivel(cats, nivel, selId) {
-        // Remove nível existente se houver
         const existente = document.getElementById(`modal-nivel-${nivel}`);
         if (existente) existente.remove();
 
@@ -889,7 +894,6 @@ function toggleBaixados(chk) {
     window.limparCategoriaModal = function() {
         categoriaPath         = [];
         hiddenInput.value     = '';
-        // Mantém apenas o nível 0 e reseta
         container.querySelectorAll('.modal-categoria-level').forEach((div, i) => {
             if (i > 0) div.remove();
         });

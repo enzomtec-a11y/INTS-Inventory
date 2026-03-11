@@ -1,5 +1,6 @@
 <?php
 require_once '../../config/_protecao.php';
+$conn->set_charset('utf8mb4');
 
 // --- 1. DETECÇÃO DE USUÁRIO E UNIDADE ---
 $usuario_nivel = $_SESSION['usuario_nivel'] ?? '';
@@ -13,6 +14,12 @@ if ($usuario_nivel === 'admin_unidade' && $usuario_unidade > 0) {
         $unidade_locais_ids = [$usuario_unidade];
     }
 }
+
+// Permissões
+$is_admin = ($usuario_nivel === 'admin'); // link administração apenas para admin global
+$is_admin_any = in_array($usuario_nivel, ['admin', 'admin_unidade']);
+$can_manage_approvals = in_array($usuario_nivel, ['admin', 'admin_unidade', 'gestor']); // gerenciar aprovações
+$can_request = true; // qualquer usuário autenticado pode solicitar (ajuste se necessário)
 
 // --- 2. CAPTURA DE FILTROS ---
 $busca_termo    = $_GET['busca_termo'] ?? ''; // Busca por Nome ou Patrimônio
@@ -85,17 +92,24 @@ if ($usuario_nivel === 'admin_unidade' && !empty($unidade_locais_ids)) {
 $sql .= " ORDER BY m.data_movimentacao DESC LIMIT 100";
 
 $stmt = $conn->prepare($sql);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
-$stmt->execute();
-$result = $stmt->get_result();
+if ($stmt === false) {
+    // Em caso de erro de prepare, log e mensagem simples
+    error_log("Erro ao preparar SQL em movimentacoes/index.php: " . $conn->error);
+    $result = false;
+    $movimentacoes = [];
+} else {
+    if (!empty($params)) {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $result = $stmt->get_result();
 
-$movimentacoes = [];
-while ($row = $result->fetch_assoc()) {
-    $movimentacoes[] = $row;
+    $movimentacoes = [];
+    while ($row = $result->fetch_assoc()) {
+        $movimentacoes[] = $row;
+    }
+    $stmt->close();
 }
-$stmt->close();
 ?>
 
 <!DOCTYPE html>
@@ -183,7 +197,9 @@ $stmt->close();
         <a href="../produtos/index.php">📦 Produtos</a>
         <a href="index.php" style="background:#495057; color:#fff;">🔄 Movimentações</a>
         <div class="sidebar-divider"></div>
-        <a href="../admin/index.php">⚙️ Administração</a>
+        <?php if ($is_admin): ?>
+            <a href="../admin/index.php">⚙️ Administração</a>
+        <?php endif; ?>
         <div style="margin-top:auto;">  <a href="../../logout.php">🚪 Sair</a>
         </div>
     </aside>
@@ -193,8 +209,12 @@ $stmt->close();
             <div class="top-header">
                 <h2 style="margin:0; color:#333;">Movimentações de Estoque</h2>
                 <div class="action-buttons">
-                    <button onclick="abrirModal('gerenciar.php', 'Aprovar / Receber')" class="btn-check">📋 Gerenciar Aprovações</button>
-                    <button onclick="abrirModal('solicitar.php', 'Nova Solicitação')" class="btn-novo">+ Nova Solicitação</button>
+                    <?php if ($can_manage_approvals): ?>
+                        <button onclick="abrirModal('gerenciar.php', 'Aprovar / Receber')" class="btn-check">📋 Gerenciar Aprovações</button>
+                    <?php endif; ?>
+                    <?php if ($can_request): ?>
+                        <button onclick="abrirModal('solicitar.php', 'Nova Solicitação')" class="btn-novo">+ Nova Solicitação</button>
+                    <?php endif; ?>
                 </div>
             </div>
 
