@@ -1,7 +1,6 @@
 <?php
 // ============================================================
 // index.php — Dashboard Principal do INTS Inventário
-// Substitui o index.html antigo
 // ============================================================
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -197,6 +196,36 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
             margin-top: 6px;
         }
 
+        /* ── Alerta de Inconsistência ── */
+        .alert-inconsistencia {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: #fff8ec;
+            border: 1px solid #ffc107;
+            border-left: 4px solid #e67e00;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 22px;
+        }
+        .alert-inconsistencia strong { color: #7c4a00; }
+        .alert-inconsistencia em { color: #a0600a; }
+        .btn-alerta-modal {
+            margin-left: auto;
+            flex-shrink: 0;
+            background: #e67e00;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 7px 16px;
+            font-size: 0.84rem;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background .15s;
+        }
+        .btn-alerta-modal:hover { background: #c96a00; }
+
         /* ── KPI Cards ── */
         .kpi-grid {
             display: grid;
@@ -294,6 +323,39 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
         .badge-cancelado  { background: #f8d7da; color: #842029; }
         .badge-aprovada   { background: #d1e7dd; color: #0a3622; }
         .badge-reprovada  { background: #f8d7da; color: #842029; }
+
+        /* ── Modal (iframe) ── */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 1000;
+            display: none; justify-content: center; align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-window {
+            background: #fff;
+            width: 95%; max-width: 1100px; height: 90%;
+            border-radius: 10px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+            display: flex; flex-direction: column; overflow: hidden;
+            animation: slideIn 0.25s ease;
+        }
+        .modal-header {
+            padding: 14px 20px; background: #f8f9fa; border-bottom: 1px solid #dee2e6;
+            display: flex; justify-content: space-between; align-items: center;
+            flex-shrink: 0;
+        }
+        .modal-title { font-weight: 700; font-size: 1rem; color: #343a40; }
+        .modal-close {
+            background: none; border: none; font-size: 1.4rem;
+            cursor: pointer; color: #6c757d; line-height: 1;
+            padding: 0 4px; transition: color .15s;
+        }
+        .modal-close:hover { color: #212529; }
+        .modal-content-frame { flex: 1; border: none; width: 100%; background: #fff; }
+        @keyframes slideIn {
+            from { transform: translateY(-18px); opacity: 0; }
+            to   { transform: translateY(0);     opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -303,12 +365,18 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
     <h2>INTS Inventário</h2>
     <a href="index.php" style="background:#495057; color:#fff;">🏠 Home</a>
     <a href="pages/produtos/index.php">📦 Produtos</a>
-    <a href="pages/movimentacoes/index.php">🔄 Movimentações</a>
+    <a href="pages/movimentacoes/index.php" style="display:flex; align-items:center;">
+        🔄 Movimentações
+        <?php if ($total_mov_pendentes > 0): ?>
+            <span class="nav-badge"><?php echo $total_mov_pendentes; ?></span>
+        <?php endif; ?>
+    </a>
     <div class="sidebar-divider"></div>
     <?php if ($is_admin): ?>
         <a href="pages/admin/index.php">⚙️ Administração</a>
     <?php endif; ?>
-    <div style="margin-top:auto;">  <a href="logout.php">🚪 Sair</a>
+    <div style="margin-top:auto;">
+        <a href="logout.php">🚪 Sair</a>
     </div>
 </aside>
 
@@ -331,8 +399,11 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
         <div>
             <strong><?php echo $total_inconsistencias; ?> produto(s) com inconsistência de estoque</strong> —
             itens marcados como <em>ativo</em> mas sem estoque e sem patrimônio ativo.
-            <a href="pages/admin/corrigir_inconsistencias.php">Verificar e corrigir →</a>
         </div>
+        <button class="btn-alerta-modal"
+            onclick="abrirModal('pages/admin/corrigir_inconsistencias.php', '⚠️ Corrigir Inconsistências de Estoque')">
+            Verificar e corrigir →
+        </button>
     </div>
     <?php endif; ?>
 
@@ -362,6 +433,7 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
             <div class="kpi-label">Patrimônios Ativos</div>
             <div class="kpi-value"><?php echo number_format($total_patrimonios); ?></div>
         </a>
+
     </div>
 
     <!-- Acesso Rápido -->
@@ -481,19 +553,20 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
                                 <?php echo htmlspecialchars(mb_strimwidth($b['produto_nome'], 0, 30, '…')); ?>
                                 <br><small style="color:#adb5bd;"><?php echo date('d/m/Y', strtotime($b['data_baixa'])); ?></small>
                             </td>
-                            <td style="color:#6c757d; font-size:0.8rem;"><?php echo htmlspecialchars(mb_strimwidth($b['motivo'] ?? '—', 0, 22, '…')); ?></td>
+                            <td style="color:#6c757d; font-size:0.8rem;"><?php echo htmlspecialchars(mb_strimwidth($b['motivo'] ?? '—', 0, 20, '…')); ?></td>
                             <td>
                                 <?php
-                                $bs  = $b['status'];
-                                $bcl = match($bs) {
+                                $sb = $b['status'];
+                                $clsb = match($sb) {
                                     'pendente'  => 'badge-pendente',
                                     'aprovada'  => 'badge-aprovada',
-                                    'reprovada' => 'badge-reprovada',
+                                    'rejeitada' => 'badge-reprovada',
+                                    'cancelada' => 'badge-cancelado',
                                     default     => ''
                                 };
-                                $bll = ['pendente'=>'Pendente','aprovada'=>'Aprovada','reprovada'=>'Reprovada'];
+                                $lblsb = ['pendente'=>'Pendente','aprovada'=>'Aprovada','rejeitada'=>'Rejeitada','cancelada'=>'Cancelada'];
                                 ?>
-                                <span class="badge <?php echo $bcl; ?>"><?php echo $bll[$bs] ?? $bs; ?></span>
+                                <span class="badge <?php echo $clsb; ?>"><?php echo $lblsb[$sb] ?? $sb; ?></span>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -505,5 +578,42 @@ if ($usuario_nivel === 'admin_unidade' && $unidade_id > 0) {
     </div><!-- /.two-col -->
 
 </main>
+
+<!-- ══════════════════════════ MODAL (iframe) ══════════════════════════ -->
+<div id="modalContainer" class="modal-overlay">
+    <div class="modal-window">
+        <div class="modal-header">
+            <span id="modalTitle" class="modal-title">Carregando…</span>
+            <button onclick="fecharModal(false)" class="modal-close" title="Fechar">&times;</button>
+        </div>
+        <iframe id="modalFrame" class="modal-content-frame" src=""></iframe>
+    </div>
+</div>
+
+<script>
+    function abrirModal(url, titulo) {
+        document.getElementById('modalTitle').innerText = titulo;
+        const sep = url.includes('?') ? '&' : '?';
+        document.getElementById('modalFrame').src = url + sep + 'modal=1';
+        document.getElementById('modalContainer').classList.add('active');
+    }
+
+    function fecharModal(recarregar = false) {
+        document.getElementById('modalContainer').classList.remove('active');
+        document.getElementById('modalFrame').src = '';
+        if (recarregar) window.location.reload();
+    }
+
+    // Fechar ao clicar no overlay
+    document.getElementById('modalContainer').addEventListener('click', function(e) {
+        if (e.target === this) fecharModal(false);
+    });
+
+    // Helper para o iframe filho fechar o modal (e opcionalmente recarregar o pai)
+    window.fecharModalDoFilho = function(recarregar) {
+        fecharModal(recarregar);
+    };
+</script>
+
 </body>
 </html>
